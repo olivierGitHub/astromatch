@@ -116,9 +116,9 @@ Load config from `{project-root}/_bmad/bmm/config.yaml` and resolve:
 
     <!-- Non-sprint story discovery -->
     <check if="{{sprint_status}} file does NOT exist">
-      <action>Search {implementation_artifacts} for stories directly</action>
+      <action>Search {implementation_artifacts} for stories directly (include epic subfolders: epic-*/*-*-*.md)</action>
       <action>Find stories with "ready-for-dev" status in files</action>
-      <action>Look for story files matching pattern: *-*-*.md</action>
+      <action>Look for story files matching pattern: epic-*/*-*-*.md (preferred) or legacy *-*-*.md at artifacts root</action>
       <action>Read each candidate story file to check Status section</action>
 
       <check if="no ready-for-dev stories found in story files">
@@ -152,7 +152,7 @@ Load config from `{project-root}/_bmad/bmm/config.yaml` and resolve:
     </check>
 
     <action>Store the found story_key (e.g., "1-2-user-authentication") for later status updates</action>
-    <action>Find matching story file in {implementation_artifacts} using story_key pattern: {{story_key}}.md</action>
+    <action>Resolve story file path: parse epic number from story_key (first numeric segment, e.g. 1-2-... → epic 1). Primary path: {implementation_artifacts}/epic-{{epic_num}}/{{story_key}}.md. If missing, fallback: {implementation_artifacts}/{{story_key}}.md (legacy flat layout)</action>
     <action>Read COMPLETE story file from discovered path</action>
 
     <anchor id="task_check" />

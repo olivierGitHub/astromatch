@@ -1,0 +1,16 @@
+# Copier vers terraform.tfvars (non versionné) et adapter.
+
+aws_region       = "eu-west-3"
+project_name     = "astromatch"
+environment      = "mvp"
+container_image  = "123456789012.dkr.ecr.eu-west-3.amazonaws.com/astromatch-mvp-api:initial"
+
+# Secret fort (≥ 32 caractères) — ne pas réutiliser en prod sans rotation.
+jwt_secret = "change-me-to-a-long-random-secret-at-least-32-chars"
+
+operator_api_key = "change-me-operator-key-production"
+
+# Optionnel
+# fargate_cpu    = 256
+# fargate_memory = 512
+# desired_count  = 1

@@ -108,7 +108,8 @@ development_status:
 
 **Story file detection:**
 
-- Check: `{story_location_absolute}/{story-key}.md` (e.g., `stories/1-1-user-authentication.md`)
+- Check: `{story_location_absolute}/epic-{N}/{story-key}.md` where `{N}` is the epic number from the key prefix (e.g. `1-2-...` → `epic-1/`)
+- Fallback (legacy): `{story_location_absolute}/{story-key}.md`
 - If exists → upgrade status to at least `ready-for-dev`
 
 **Preservation rule:**

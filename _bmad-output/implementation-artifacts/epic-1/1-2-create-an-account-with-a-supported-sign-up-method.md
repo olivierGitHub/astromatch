@@ -100,7 +100,7 @@ So that **I can become a member and access astromatch** (FR1).
 | PRD | `_bmad-output/planning-artifacts/prd.md` — FR1 |
 | Architecture | `_bmad-output/planning-artifacts/architecture.md` — envelopes, identity mapping, naming |
 | UX | `_bmad-output/planning-artifacts/ux-design-specification.md` — UX-DR11, UX-DR12, foundations |
-| Prior implementation | `_bmad-output/implementation-artifacts/1-1-initialize-mobile-and-api-projects-with-health-check-and-design-tokens.md` |
+| Prior implementation | `_bmad-output/implementation-artifacts/epic-1/1-1-initialize-mobile-and-api-projects-with-health-check-and-design-tokens.md` |
 
 ## Dev Agent Record
 

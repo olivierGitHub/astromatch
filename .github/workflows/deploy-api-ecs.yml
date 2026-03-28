@@ -1,0 +1,71 @@
+# Déploie l'image API sur ECS Fargate (voir .documentation/deployment/github-actions-cicd.md).
+name: Deploy API to ECS
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Tag image ECR (défaut = SHA du commit)"
+        required: false
+        default: ""
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image tag
+        id: tag
+        run: |
+          if [ -n "${{ github.event.inputs.image_tag }}" ]; then
+            echo "tag=${{ github.event.inputs.image_tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and push Docker image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          docker build -t "$REGISTRY/$REPOSITORY:$TAG" astromatch-api
+          docker push "$REGISTRY/$REPOSITORY:$TAG"
+          echo "IMAGE_URI=$REGISTRY/$REPOSITORY:$TAG" >> "$GITHUB_ENV"
+
+      - name: Register new task definition and update service
+        env:
+          CLUSTER: ${{ vars.ECS_CLUSTER_NAME }}
+          SERVICE: ${{ vars.ECS_SERVICE_NAME }}
+        run: |
+          set -euo pipefail
+          TD_ARN=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+            --query 'services[0].taskDefinition' --output text)
+          aws ecs describe-task-definition --task-definition "$TD_ARN" \
+            --query 'taskDefinition' > td.json
+          jq --arg IMG "$IMAGE_URI" '
+            del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)
+            | .containerDefinitions[0].image = $IMG
+          ' td.json > td-new.json
+          NEW_TD=$(aws ecs register-task-definition --cli-input-json file://td-new.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
+            --task-definition "$NEW_TD" --force-new-deployment
