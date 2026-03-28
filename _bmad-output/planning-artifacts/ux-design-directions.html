@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>astromatch UX Design Directions</title>
+  <style>
+    :root {
+      --bg: #0f1020;
+      --surface: #17192e;
+      --text: #f8fafc;
+      --muted: #aab1c5;
+      --primary: #6c5ce7;
+      --secondary: #14b8a6;
+      --accent: #f59e0b;
+      --danger: #ef476f;
+      --success: #2ec4b6;
+      --radius-lg: 16px;
+      --radius-md: 12px;
+      --space-1: 4px;
+      --space-2: 8px;
+      --space-3: 12px;
+      --space-4: 16px;
+      --space-5: 24px;
+      --space-6: 32px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: linear-gradient(180deg, #0c0d1b 0%, #0f1020 100%);
+      color: var(--text);
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    }
+    .wrap { max-width: 1320px; margin: 0 auto; padding: 24px; }
+    h1 { margin: 0 0 8px; font-size: 32px; }
+    .subtitle { color: var(--muted); margin: 0 0 24px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 20px; }
+    .card {
+      background: rgba(23, 25, 46, 0.88);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: var(--radius-lg);
+      padding: var(--space-4);
+      backdrop-filter: blur(4px);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+    }
+    .card h2 { font-size: 18px; margin: 0 0 6px; }
+    .meta { color: var(--muted); font-size: 13px; margin-bottom: 10px; }
+    .phone {
+      background: #0b0d1a;
+      border: 1px solid rgba(255,255,255,0.09);
+      border-radius: 26px;
+      height: 620px;
+      overflow: hidden;
+      position: relative;
+    }
+    .status { height: 28px; background: rgba(255,255,255,0.03); }
+    .hero {
+      margin: 12px;
+      border-radius: var(--radius-lg);
+      padding: 14px;
+      color: #fff;
+      min-height: 130px;
+    }
+    .hero h3 { margin: 0 0 6px; font-size: 20px; }
+    .hero p { margin: 0; font-size: 13px; line-height: 1.45; opacity: 0.95; }
+    .profile {
+      margin: 0 12px;
+      border-radius: var(--radius-md);
+      background: #15172a;
+      border: 1px solid rgba(255,255,255,0.06);
+      padding: 12px;
+    }
+    .img {
+      height: 210px;
+      border-radius: 10px;
+      background: linear-gradient(145deg, rgba(108,92,231,.65), rgba(20,184,166,.35));
+      margin-bottom: 10px;
+    }
+    .name { font-weight: 700; margin-bottom: 4px; }
+    .bio { color: var(--muted); font-size: 13px; line-height: 1.4; }
+    .actions {
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      padding: 14px;
+      background: linear-gradient(180deg, rgba(11,13,26,0), rgba(11,13,26,0.95) 35%);
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+    }
+    .btn {
+      min-width: 44px; min-height: 44px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.2);
+      display: grid; place-items: center;
+      color: #fff;
+      font-weight: 700;
+      font-size: 14px;
+    }
+    .chiprow { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+    .chip {
+      font-size: 11px;
+      color: #fff;
+      padding: 5px 8px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.2);
+    }
+    .note { font-size: 13px; color: var(--muted); margin-top: 10px; }
+    .d1 .hero { background: linear-gradient(130deg, #6c5ce7, #14b8a6); }
+    .d2 .hero { background: linear-gradient(130deg, #5346cc, #2f4f99); }
+    .d3 .hero { background: linear-gradient(130deg, #4b3fb8, #1f9f8d); }
+    .d4 .hero { background: linear-gradient(145deg, #6c5ce7 0%, #7f67e6 60%, #14b8a6 100%); min-height: 170px; }
+    .d5 .hero { background: linear-gradient(130deg, #5a4ed0, #14b8a6); }
+    .d6 .hero { background: linear-gradient(130deg, #6c5ce7, #3ba89f); }
+    .d2 .profile, .d6 .profile { background: #101223; }
+    .d3 .img { background: linear-gradient(145deg, rgba(245,158,11,.25), rgba(108,92,231,.65)); }
+    .d4 .chip { background: rgba(245,158,11,0.25); }
+    .d5 .actions { justify-content: space-between; padding: 12px 16px; }
+    .d6 .profile { margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>astromatch Design Directions</h1>
+    <p class="subtitle">Palette A + modern clarity tone. Smooth, non-aggressive interaction style.</p>
+    <div class="grid">
+      <section class="card d1">
+        <h2>Direction 1 - Balanced Hero</h2>
+        <div class="meta">Clear card hierarchy, medium density</div>
+        <div class="phone">
+          <div class="status"></div>
+          <div class="hero"><h3>Tonight: Gentle Spark</h3><p>Suggested dynamic: Romance. Calm momentum, low pressure.</p><div class="chiprow"><span class="chip">Moon soft</span><span class="chip">Light vibe</span></div></div>
+          <div class="profile"><div class="img"></div><div class="name">Maya, 29</div><div class="bio">Loves museums and late tea walks. Looking for steady chemistry.</div></div>
+          <div class="actions"><div class="btn">X</div><div class="btn">★</div><div class="btn">❤</div></div>
+        </div>
+        <div class="note">Best for readability and broad MVP adoption.</div>
+      </section>
+
+      <section class="card d2">
+        <h2>Direction 2 - Minimal Focus</h2>
+        <div class="meta">Reduced visual noise, fast decision support</div>
+        <div class="phone">
+          <div class="status"></div>
+          <div class="hero"><h3>Clear Intent Window</h3><p>Suggested dynamic: Serious. Low distraction mode.</p></div>
+          <div class="profile"><div class="img"></div><div class="name">Jordan, 31</div><div class="bio">Strong communication, no mixed signals, prefers intentional pace.</div></div>
+          <div class="actions"><div class="btn">X</div><div class="btn">★</div><div class="btn">❤</div></div>
+        </div>
+        <div class="note">Best for speed and clarity, least decorative.</div>
+      </section>
+
+      <section class="card d3">
+        <h2>Direction 3 - Warm Accent Pulse</h2>
+        <div class="meta">Accent-led emotional warmth without aggression</div>
+        <div class="phone">
+          <div class="status"></div>
+          <div class="hero"><h3>Connected Flow</h3><p>Suggested dynamic: Complicity. Warm confidence and stability.</p><div class="chiprow"><span class="chip">Trust cue</span><span class="chip">Easy tone</span></div></div>
+          <div class="profile"><div class="img"></div><div class="name">Alex, 27</div><div class="bio">Music producer. Enjoys long conversations and thoughtful dates.</div></div>
+          <div class="actions"><div class="btn">X</div><div class="btn">★</div><div class="btn">❤</div></div>
+        </div>
+        <div class="note">Best for "seen + courage" emotional response.</div>
+      </section>
+
+      <section class="card d4">
+        <h2>Direction 4 - Expanded Session Story</h2>
+        <div class="meta">Larger hero region with stronger narrative context</div>
+        <div class="phone">
+          <div class="status"></div>
+          <div class="hero"><h3>Relationship Weather</h3><p>Suggested dynamic: Au feeling. This week favors honest starts and soft tempo.</p><div class="chiprow"><span class="chip">Context first</span><span class="chip">No score</span></div></div>
+          <div class="profile"><div class="img"></div><div class="name">Lina, 30</div><div class="bio">Hiking, poetry, and spontaneous city weekends.</div></div>
+          <div class="actions"><div class="btn">X</div><div class="btn">★</div><div class="btn">❤</div></div>
+        </div>
+        <div class="note">Best for differentiation and product signature.</div>
+      </section>
+
+      <section class="card d5">
+        <h2>Direction 5 - Action-Weighted</h2>
+        <div class="meta">Heavier CTA zone, commerce/supportive prompts friendly</div>
+        <div class="phone">
+          <div class="status"></div>
+          <div class="hero"><h3>Smooth Momentum</h3><p>Suggested dynamic: Adventure. Keep it light, keep it true.</p></div>
+          <div class="profile"><div class="img"></div><div class="name">Noah, 28</div><div class="bio">Weekend roadtrips. Looking for chemistry and curiosity.</div></div>
+          <div class="actions"><div class="btn">Nope</div><div class="btn">Like</div><div class="btn">Not me</div></div>
+        </div>
+        <div class="note">Best for conversion testing and explicit affordances.</div>
+      </section>
+
+      <section class="card d6">
+        <h2>Direction 6 - Message-Ready Continuity</h2>
+        <div class="meta">Closer visual continuity between feed and chat screens</div>
+        <div class="phone">
+          <div class="status"></div>
+          <div class="hero"><h3>Better Match Signal</h3><p>Suggested dynamic: Build. Intentional, steady, reciprocal.</p><div class="chiprow"><span class="chip">Feed</span><span class="chip">Match</span><span class="chip">Chat</span></div></div>
+          <div class="profile"><div class="img"></div><div class="name">Sara, 26</div><div class="bio">Bookstore dates and strong coffee. Values consistency and kindness.</div></div>
+          <div class="actions"><div class="btn">X</div><div class="btn">★</div><div class="btn">❤</div></div>
+        </div>
+        <div class="note">Best for lifecycle coherence after first meaningful match.</div>
+      </section>
+    </div>
+  </div>
+</body>
+</html>

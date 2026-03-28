@@ -1,0 +1,2413 @@
+openapi: 3.0.3
+info:
+  title: astromatch-api
+  version: 0.6.0
+  description: |
+    Authoritative REST contract for astromatch. JSON success/error envelopes (`data`, `meta`, `error`);
+    `traceId` on errors. Epic 1: identity, JWT session, recovery, minimum age, account deletion,
+    consents, profile (birth, location, dynamics, bio, photos), onboarding completion, legal/privacy,
+    place search (MVP stub), auth rate limits (per-IP sliding window; configurable).
+    Epic 2: opaque ordered feed (`/feed/candidates`), session-style cards (no numeric score), swipe actions
+    with stub daily quotas, persisted swipe events, per-user swipe burst rate limit, feed photo media for
+    eligible profiles.
+    Epic 3: mutual matches (`/matches`), text messages per match, optional `match` payload on swipe when
+    reciprocal like creates a match, Expo push token registration (`/me/device/push-token`).
+    Epic 4: mismatch feedback (`/feed/mismatch`) with focus (dynamic vs profile), persisted events, opaque
+    feed reordering for targets with feedback—no exposed ranking rules.
+    Epic 5: daily swipe quota (`/feed/quota`), bonus like credits from IAP, alignment boost and location pass
+    timestamps on the user, stub/real billing validation (`/billing/*`), restore purchases.
+    Epic 6: safety reports and blocks (`/safety/*`), operator moderation queue (`/operator/*`, `X-Operator-Key`),
+    help channel placeholders (`/help/channels`), account status enforcement for suspended/banned users,
+    block enforcement in feed, matches list, and messaging; rate limits on report and block actions.
+  license:
+    name: Proprietary
+    url: https://choosealicense.com/no-permission/
+
+servers:
+  - url: /
+    description: Relative to your API host (e.g. https://api.example.com in production).
+
+tags:
+  - name: Platform
+    description: Health and ops
+  - name: Identity
+    description: Registration, JWT session, recovery, current user
+  - name: Legal
+    description: Static legal copy
+  - name: Places
+    description: Birth place search (MVP stub; replaceable with geocoder)
+  - name: Profile
+    description: Authenticated member profile and onboarding
+  - name: Feed
+    description: Discovery feed, swipes, and feed-scoped media
+  - name: Matches
+    description: Mutual matches and in-app messaging
+  - name: Billing
+    description: In-app purchase validation and restore (store integration TBD in production)
+  - name: Safety
+    description: Reports, blocks, and community safety
+  - name: Help
+    description: Help and support channel placeholders
+  - name: Operator
+    description: Moderation queue (API key; not end-user JWT)
+
+security: []
+
+paths:
+  /actuator/health:
+    get:
+      summary: Spring Boot Actuator health
+      operationId: actuatorHealth
+      tags:
+        - Platform
+      responses:
+        '200':
+          description: Service health
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          description: Bad request (e.g. invalid Accept header)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/auth/register:
+    post:
+      summary: Register with email, password, and birth date (minimum age enforced server-side)
+      operationId: register
+      tags:
+        - Identity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Account created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterSuccessEnvelope'
+        '400':
+          description: Validation or malformed body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: Age below minimum (`AGE_REQUIREMENT_NOT_MET`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: Email already registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '429':
+          description: Auth rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/auth/login:
+    post:
+      summary: Sign in; returns JWT access + refresh tokens
+      operationId: login
+      tags:
+        - Identity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Tokens issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenSuccessEnvelope'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '429':
+          description: Auth rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/auth/refresh:
+    post:
+      summary: Rotate refresh token and issue new access token
+      operationId: refreshTokens
+      tags:
+        - Identity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: New tokens
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenSuccessEnvelope'
+        '401':
+          description: Invalid or expired refresh token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '429':
+          description: Auth rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/auth/logout:
+    post:
+      summary: Revoke refresh token server-side
+      operationId: logout
+      tags:
+        - Identity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogoutRequest'
+      responses:
+        '200':
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogoutSuccessEnvelope'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '429':
+          description: Auth rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/auth/me:
+    get:
+      summary: Current user and onboarding readiness flags
+      operationId: me
+      tags:
+        - Identity
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeSuccessEnvelope'
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/auth/forgot-password:
+    post:
+      summary: Request password recovery (no email enumeration)
+      operationId: forgotPassword
+      tags:
+        - Identity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForgotPasswordRequest'
+      responses:
+        '200':
+          description: Request accepted (`sent` always true when body valid)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForgotPasswordSuccessEnvelope'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '429':
+          description: Too many attempts (per-email cooldown and/or global auth rate limit)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/auth/reset-password:
+    post:
+      summary: Set a new password using a reset token
+      operationId: resetPassword
+      tags:
+        - Identity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetPasswordRequest'
+      responses:
+        '200':
+          description: Password updated; all refresh tokens for user revoked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogoutSuccessEnvelope'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Invalid or expired reset token (`INVALID_RESET_TOKEN`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '429':
+          description: Auth rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/account:
+    delete:
+      summary: Permanently delete the authenticated account and related data
+      operationId: deleteAccount
+      tags:
+        - Identity
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Account removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogoutSuccessEnvelope'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/legal/privacy:
+    get:
+      summary: Privacy notice text (MVP static copy)
+      operationId: getPrivacyNotice
+      tags:
+        - Legal
+      responses:
+        '200':
+          description: Privacy notice body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrivacyNoticeSuccessEnvelope'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/places/search:
+    get:
+      summary: Search birth places (MVP stub list; filter by query)
+      operationId: searchPlaces
+      tags:
+        - Places
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Free-text filter
+      responses:
+        '200':
+          description: Matching suggestions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaceSearchSuccessEnvelope'
+        '400':
+          description: Invalid or missing query parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/me/consents:
+    get:
+      summary: Optional consent flags for the current user
+      operationId: getConsents
+      tags:
+        - Profile
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Map of consent keys to granted boolean
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsentsSuccessEnvelope'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+    put:
+      summary: Update consent flags (keys are validated server-side)
+      operationId: putConsents
+      tags:
+        - Profile
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsentsUpdateRequest'
+      responses:
+        '200':
+          description: Updated consent map
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsentsSuccessEnvelope'
+        '400':
+          description: Unknown consent key (`PROFILE_VALIDATION`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/me/profile/birth:
+    put:
+      summary: Birth date context (place + IANA timezone; time or unknown)
+      operationId: putProfileBirth
+      tags:
+        - Profile
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BirthProfileRequest'
+      responses:
+        '200':
+          description: Saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptySuccessEnvelope'
+        '400':
+          description: Validation or profile rules (`PROFILE_VALIDATION`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/me/profile/location:
+    put:
+      summary: Current location (device or manual label)
+      operationId: putProfileLocation
+      tags:
+        - Profile
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LocationProfileRequest'
+      responses:
+        '200':
+          description: Saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptySuccessEnvelope'
+        '400':
+          description: Validation (`PROFILE_VALIDATION`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/me/profile/dynamics:
+    put:
+      summary: Sought relationship dynamics (up to two labels from catalog)
+      operationId: putProfileDynamics
+      tags:
+        - Profile
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DynamicsProfileRequest'
+      responses:
+        '200':
+          description: Saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptySuccessEnvelope'
+        '400':
+          description: Unknown label or more than two (`PROFILE_VALIDATION`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/me/profile/bio:
+    put:
+      summary: Short bio text
+      operationId: putProfileBio
+      tags:
+        - Profile
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BioProfileRequest'
+      responses:
+        '200':
+          description: Saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptySuccessEnvelope'
+        '400':
+          description: Bio too long (`PROFILE_VALIDATION`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/me/profile/photos:
+    post:
+      summary: Upload one profile photo (jpeg, png, or webp; max 6 per user)
+      operationId: uploadProfilePhoto
+      tags:
+        - Profile
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Photo stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfilePhotoUploadSuccessEnvelope'
+        '400':
+          description: Invalid type, size, or max photos (`PROFILE_VALIDATION`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/me/profile/photos/{photoId}:
+    delete:
+      summary: Remove a profile photo
+      operationId: deleteProfilePhoto
+      tags:
+        - Profile
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: photoId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptySuccessEnvelope'
+        '400':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/me/media/photos/{photoId}:
+    get:
+      summary: Download raw photo bytes (same user only)
+      operationId: getProfilePhotoMedia
+      tags:
+        - Profile
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: photoId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Image body
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/me/onboarding/complete:
+    post:
+      summary: Mark onboarding complete after server-side checks (privacy ack, profile completeness)
+      operationId: completeOnboarding
+      tags:
+        - Profile
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Onboarding marked complete
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptySuccessEnvelope'
+        '400':
+          description: Preconditions not met (`PROFILE_VALIDATION`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/me/device/push-token:
+    put:
+      summary: Register or update Expo push notification token for this device
+      operationId: putExpoPushToken
+      tags:
+        - Profile
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExpoPushTokenBody'
+      responses:
+        '200':
+          description: Token stored (or cleared when null/blank)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptySuccessEnvelope'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/feed/candidates:
+    get:
+      summary: Opaque ordered list of candidate profiles (no compatibility score)
+      operationId: feedCandidates
+      tags:
+        - Feed
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Candidates for the current viewer (already swiped users excluded)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedCandidatesSuccessEnvelope'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/feed/quota:
+    get:
+      summary: Daily swipe allowance snapshot (likes, supers, bonus credits, boost and location pass)
+      operationId: feedQuota
+      tags:
+        - Feed
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Server-side quota and entitlement hints for UI
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedQuotaSuccessEnvelope'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/feed/swipe:
+    post:
+      summary: Record pass, like, or super-like (stub quotas; burst rate limit)
+      operationId: feedSwipe
+      tags:
+        - Feed
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FeedSwipeRequest'
+      responses:
+        '200':
+          description: Swipe stored; remaining free likes / super-likes today (UTC day)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedSwipeResultEnvelope'
+        '400':
+          description: Invalid target or duplicate swipe (`SWIPE_TARGET_INVALID`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: Daily like or super-like quota exceeded (`QUOTA_EXCEEDED`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '429':
+          description: Swipe burst rate limit (`RATE_LIMITED`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/feed/mismatch:
+    post:
+      summary: Record “does not match me” feedback for a profile still in the feed
+      operationId: feedMismatch
+      tags:
+        - Feed
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FeedMismatchRequest'
+      responses:
+        '200':
+          description: Feedback stored; feed ordering may shift opaquely on later loads
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptySuccessEnvelope'
+        '400':
+          description: Invalid target or already swiped (`SWIPE_TARGET_INVALID`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '429':
+          description: Mismatch burst rate limit (`RATE_LIMITED`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/billing/purchase/validate:
+    post:
+      summary: Validate a purchase receipt or transaction and grant entitlements (store-specific validation in production)
+      operationId: billingPurchaseValidate
+      tags:
+        - Billing
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PurchaseValidateRequest'
+      responses:
+        '200':
+          description: Entitlements updated (or idempotent no-op for duplicate transaction id)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptySuccessEnvelope'
+        '400':
+          description: Validation failed (`BILLING_VALIDATION_FAILED`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/billing/restore:
+    post:
+      summary: Restore prior purchases from the store and sync entitlements
+      operationId: billingRestore
+      tags:
+        - Billing
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PurchaseRestoreRequest'
+      responses:
+        '200':
+          description: Restore processed (idempotent per transaction id)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptySuccessEnvelope'
+        '400':
+          description: Validation failed (`BILLING_VALIDATION_FAILED`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/safety/report:
+    post:
+      summary: Submit a user report (rate-limited per reporter per hour)
+      operationId: safetyReport
+      tags:
+        - Safety
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SafetyReportRequest'
+      responses:
+        '200':
+          description: Report stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportSubmittedSuccessEnvelope'
+        '400':
+          description: Validation (`PROFILE_VALIDATION`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '429':
+          description: Report rate limit (`RATE_LIMITED`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/safety/block:
+    post:
+      summary: Block another user (rate-limited per blocker per day)
+      operationId: safetyBlock
+      tags:
+        - Safety
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SafetyBlockRequest'
+      responses:
+        '200':
+          description: Block recorded (idempotent if already blocked)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptySuccessEnvelope'
+        '400':
+          description: Invalid target (`PROFILE_VALIDATION`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '429':
+          description: Block rate limit (`RATE_LIMITED`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/safety/blocks:
+    get:
+      summary: List user IDs the current member has blocked
+      operationId: safetyListBlocks
+      tags:
+        - Safety
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Block list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlockListSuccessEnvelope'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/safety/blocks/{blockedUserId}:
+    delete:
+      summary: Unblock a user
+      operationId: safetyUnblock
+      tags:
+        - Safety
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: blockedUserId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Unblock applied (no-op if not blocked)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptySuccessEnvelope'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/help/channels:
+    get:
+      summary: Placeholder help and support channels (account/data vs billing)
+      operationId: helpChannels
+      tags:
+        - Help
+      responses:
+        '200':
+          description: Channel groups with mailto-style hints
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelpChannelsSuccessEnvelope'
+        '404':
+          description: Reserved (static payload in current implementation)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/operator/reports:
+    get:
+      summary: List open reports (operator API key)
+      operationId: operatorListReports
+      tags:
+        - Operator
+      parameters:
+        - name: X-Operator-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Open reports
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorReportsSuccessEnvelope'
+        '401':
+          description: Invalid operator key (`OPERATOR_AUTH_INVALID`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/operator/reports/{reportId}/resolve:
+    post:
+      summary: Resolve a report with moderation outcome
+      operationId: operatorResolveReport
+      tags:
+        - Operator
+      parameters:
+        - name: X-Operator-Key
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: reportId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OperatorResolveRequest'
+      responses:
+        '200':
+          description: Report resolved; user account status may be updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptySuccessEnvelope'
+        '400':
+          description: Validation (`PROFILE_VALIDATION`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Invalid operator key (`OPERATOR_AUTH_INVALID`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/feed/profiles/{ownerUserId}/photos/{photoId}:
+    get:
+      summary: Profile photo bytes for feed viewing (viewer must not have swiped this profile yet)
+      operationId: feedProfilePhoto
+      tags:
+        - Feed
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: ownerUserId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: photoId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Image body
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/matches:
+    get:
+      summary: List mutual matches for the current user
+      operationId: listMatches
+      tags:
+        - Matches
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Match summaries (newest first)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchListSuccessEnvelope'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/matches/{matchId}/messages:
+    get:
+      summary: List messages in a match thread
+      operationId: listMatchMessages
+      tags:
+        - Matches
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: matchId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Messages in chronological order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchMessagesSuccessEnvelope'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: Caller is not a participant (`MATCH_ACCESS_DENIED`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Unknown match (`MATCH_NOT_FOUND`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+    post:
+      summary: Send a text message in a match thread
+      operationId: sendMatchMessage
+      tags:
+        - Matches
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: matchId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMatchMessageBody'
+      responses:
+        '200':
+          description: Message persisted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchMessageSuccessEnvelope'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: Caller is not a participant (`MATCH_ACCESS_DENIED`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Unknown match (`MATCH_NOT_FOUND`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    RegisterRequest:
+      type: object
+      required:
+        - email
+        - password
+        - birthDate
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+          maxLength: 128
+        birthDate:
+          type: string
+          format: date
+          description: ISO-8601 date (YYYY-MM-DD); must yield age >= configured minimum
+
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+          maxLength: 128
+
+    RefreshRequest:
+      type: object
+      required:
+        - refreshToken
+      properties:
+        refreshToken:
+          type: string
+
+    LogoutRequest:
+      type: object
+      required:
+        - refreshToken
+      properties:
+        refreshToken:
+          type: string
+
+    ForgotPasswordRequest:
+      type: object
+      required:
+        - email
+      properties:
+        email:
+          type: string
+          format: email
+
+    ResetPasswordRequest:
+      type: object
+      required:
+        - token
+        - newPassword
+      properties:
+        token:
+          type: string
+          description: Opaque token from email (or dev-only API response when exposed)
+        newPassword:
+          type: string
+          minLength: 8
+          maxLength: 128
+
+    ForgotPasswordResponse:
+      type: object
+      required:
+        - sent
+      properties:
+        sent:
+          type: boolean
+        resetToken:
+          type: string
+          nullable: true
+          description: Only when astromatch.recovery.expose-reset-token is true (never in production)
+
+    PrivacyNoticeResponse:
+      type: object
+      required:
+        - content
+      properties:
+        content:
+          type: string
+
+    PlaceSuggestion:
+      type: object
+      required:
+        - label
+        - lat
+        - lng
+        - timezone
+      properties:
+        label:
+          type: string
+        lat:
+          type: number
+          format: double
+        lng:
+          type: number
+          format: double
+        timezone:
+          type: string
+          description: IANA timezone id
+
+    PlaceSearchResponse:
+      type: object
+      required:
+        - places
+      properties:
+        places:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlaceSuggestion'
+
+    ConsentsUpdateRequest:
+      type: object
+      description: |
+        Optional keys `notifications`, `analytics`, `privacy_ack` (boolean).
+        Server rejects unknown keys.
+      properties:
+        notifications:
+          type: boolean
+        analytics:
+          type: boolean
+        privacy_ack:
+          type: boolean
+      additionalProperties: false
+
+    BirthProfileRequest:
+      type: object
+      required:
+        - birthTimeUnknown
+        - birthPlaceLabel
+        - birthTimezone
+      properties:
+        birthTimeUnknown:
+          type: boolean
+        birthTime:
+          type: string
+          nullable: true
+          description: Local time (e.g. 14:30:00); required when birthTimeUnknown is false
+        birthPlaceLabel:
+          type: string
+        birthPlaceLat:
+          type: number
+          format: double
+          nullable: true
+        birthPlaceLng:
+          type: number
+          format: double
+          nullable: true
+        birthTimezone:
+          type: string
+          description: IANA id (e.g. Europe/Paris)
+
+    LocationProfileRequest:
+      type: object
+      required:
+        - label
+        - manual
+      properties:
+        label:
+          type: string
+        lat:
+          type: number
+          format: double
+          nullable: true
+        lng:
+          type: number
+          format: double
+          nullable: true
+        manual:
+          type: boolean
+          description: false when coordinates came from device GPS
+
+    DynamicsProfileRequest:
+      type: object
+      properties:
+        labels:
+          type: array
+          maxItems: 2
+          items:
+            $ref: '#/components/schemas/RelationshipDynamicLabel'
+
+    RelationshipDynamicLabel:
+      type: string
+      enum:
+        - deep_connection
+        - playful_exploration
+        - slow_burn
+        - adventure_together
+        - spiritual_alignment
+        - friendship_first
+        - passion_forward
+        - co_creation
+
+    BioProfileRequest:
+      type: object
+      properties:
+        bio:
+          type: string
+          maxLength: 2000
+          nullable: true
+
+    ProfilePhotoDto:
+      type: object
+      required:
+        - id
+        - sortOrder
+        - contentType
+      properties:
+        id:
+          type: string
+          format: uuid
+        sortOrder:
+          type: integer
+        contentType:
+          type: string
+          example: image/jpeg
+
+    TokenBundle:
+      type: object
+      required:
+        - accessToken
+        - refreshToken
+        - tokenType
+        - expiresIn
+        - email
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        tokenType:
+          type: string
+          example: Bearer
+        expiresIn:
+          type: integer
+          description: Access token lifetime in seconds
+        email:
+          type: string
+          format: email
+
+    RegisterResponse:
+      type: object
+      required:
+        - userId
+        - email
+      properties:
+        userId:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+
+    MeResponse:
+      type: object
+      required:
+        - userId
+        - email
+        - onboardingCompleted
+        - birthProfileComplete
+        - locationComplete
+        - dynamicsComplete
+        - presentationComplete
+      properties:
+        userId:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        onboardingCompleted:
+          type: boolean
+        birthProfileComplete:
+          type: boolean
+        locationComplete:
+          type: boolean
+        dynamicsComplete:
+          type: boolean
+        presentationComplete:
+          type: boolean
+          description: true if bio non-empty or at least one photo
+
+    RegisterSuccessEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      properties:
+        data:
+          $ref: '#/components/schemas/RegisterResponse'
+        meta:
+          type: object
+          additionalProperties: true
+        error:
+          type: object
+          nullable: true
+
+    TokenSuccessEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      properties:
+        data:
+          $ref: '#/components/schemas/TokenBundle'
+        meta:
+          type: object
+          additionalProperties: true
+        error:
+          type: object
+          nullable: true
+
+    MeSuccessEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      properties:
+        data:
+          $ref: '#/components/schemas/MeResponse'
+        meta:
+          type: object
+          additionalProperties: true
+        error:
+          type: object
+          nullable: true
+
+    LogoutSuccessEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      properties:
+        data:
+          type: object
+          nullable: true
+        meta:
+          type: object
+          additionalProperties: true
+        error:
+          type: object
+          nullable: true
+
+    ForgotPasswordSuccessEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      properties:
+        data:
+          $ref: '#/components/schemas/ForgotPasswordResponse'
+        meta:
+          type: object
+          additionalProperties: true
+        error:
+          type: object
+          nullable: true
+
+    PrivacyNoticeSuccessEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      properties:
+        data:
+          $ref: '#/components/schemas/PrivacyNoticeResponse'
+        meta:
+          type: object
+          additionalProperties: true
+        error:
+          type: object
+          nullable: true
+
+    PlaceSearchSuccessEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      properties:
+        data:
+          $ref: '#/components/schemas/PlaceSearchResponse'
+        meta:
+          type: object
+          additionalProperties: true
+        error:
+          type: object
+          nullable: true
+
+    ConsentsMap:
+      type: object
+      description: |
+        Known keys `notifications`, `analytics`, `privacy_ack` (boolean).
+        Server may return defaults for missing keys.
+      additionalProperties:
+        type: boolean
+
+    ConsentsSuccessEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      properties:
+        data:
+          $ref: '#/components/schemas/ConsentsMap'
+        meta:
+          type: object
+          additionalProperties: true
+        error:
+          type: object
+          nullable: true
+
+    SafetyReportRequest:
+      type: object
+      required:
+        - reportedUserId
+        - context
+        - reasonCode
+      properties:
+        reportedUserId:
+          type: string
+          format: uuid
+        context:
+          type: string
+          enum: [FEED, CHAT, MATCH]
+        reasonCode:
+          type: string
+          maxLength: 64
+        detail:
+          type: string
+          maxLength: 2000
+          nullable: true
+
+    ReportSubmitted:
+      type: object
+      required:
+        - reportId
+      properties:
+        reportId:
+          type: string
+          format: uuid
+
+    ReportSubmittedSuccessEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      properties:
+        data:
+          $ref: '#/components/schemas/ReportSubmitted'
+        meta:
+          type: object
+          additionalProperties: true
+        error:
+          type: object
+          nullable: true
+
+    SafetyBlockRequest:
+      type: object
+      required:
+        - blockedUserId
+      properties:
+        blockedUserId:
+          type: string
+          format: uuid
+
+    BlockList:
+      type: object
+      required:
+        - blockedUserIds
+      properties:
+        blockedUserIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+
+    BlockListSuccessEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      properties:
+        data:
+          $ref: '#/components/schemas/BlockList'
+        meta:
+          type: object
+          additionalProperties: true
+        error:
+          type: object
+          nullable: true
+
+    HelpChannel:
+      type: object
+      required:
+        - id
+        - label
+        - description
+        - contactHint
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        description:
+          type: string
+        contactHint:
+          type: string
+
+    HelpChannelsResponse:
+      type: object
+      required:
+        - accountAndData
+        - billingAndPurchases
+      properties:
+        accountAndData:
+          type: array
+          items:
+            $ref: '#/components/schemas/HelpChannel'
+        billingAndPurchases:
+          type: array
+          items:
+            $ref: '#/components/schemas/HelpChannel'
+
+    HelpChannelsSuccessEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      properties:
+        data:
+          $ref: '#/components/schemas/HelpChannelsResponse'
+        meta:
+          type: object
+          additionalProperties: true
+        error:
+          type: object
+          nullable: true
+
+    OperatorReport:
+      type: object
+      required:
+        - id
+        - reporterId
+        - reportedUserId
+        - contextType
+        - reasonCode
+        - detail
+        - status
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        reporterId:
+          type: string
+          format: uuid
+        reportedUserId:
+          type: string
+          format: uuid
+        contextType:
+          type: string
+        reasonCode:
+          type: string
+        detail:
+          type: string
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    OperatorReportsSuccessEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/OperatorReport'
+        meta:
+          type: object
+          additionalProperties: true
+        error:
+          type: object
+          nullable: true
+
+    OperatorResolveRequest:
+      type: object
+      required:
+        - action
+      properties:
+        action:
+          type: string
+          enum: [DISMISS, WARN, SUSPEND, BAN]
+        note:
+          type: string
+          maxLength: 2000
+          nullable: true
+
+    EmptySuccessEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      properties:
+        data:
+          type: object
+          nullable: true
+        meta:
+          type: object
+          additionalProperties: true
+        error:
+          type: object
+          nullable: true
+
+    ProfilePhotoUploadSuccessEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      properties:
+        data:
+          $ref: '#/components/schemas/ProfilePhotoDto'
+        meta:
+          type: object
+          additionalProperties: true
+        error:
+          type: object
+          nullable: true
+
+    FeedPhotoRef:
+      type: object
+      required:
+        - id
+        - sortOrder
+        - contentType
+      properties:
+        id:
+          type: string
+          format: uuid
+        sortOrder:
+          type: integer
+        contentType:
+          type: string
+
+    FeedCandidateCard:
+      type: object
+      required:
+        - userId
+        - cosmicContext
+        - suggestedDynamicKey
+        - suggestedDynamicTitle
+        - localityLine
+        - bioPreview
+        - photos
+      properties:
+        userId:
+          type: string
+          format: uuid
+        cosmicContext:
+          type: string
+          description: Opaque narrative copy; not a score or percentage.
+        suggestedDynamicKey:
+          type: string
+        suggestedDynamicTitle:
+          type: string
+        localityLine:
+          type: string
+          description: Secondary locality hint (not dominant in layout).
+        bioPreview:
+          type: string
+        photos:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeedPhotoRef'
+
+    FeedCandidatesPayload:
+      type: object
+      required:
+        - candidates
+      properties:
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeedCandidateCard'
+
+    FeedCandidatesSuccessEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      properties:
+        data:
+          $ref: '#/components/schemas/FeedCandidatesPayload'
+        meta:
+          type: object
+          additionalProperties: true
+        error:
+          type: object
+          nullable: true
+
+    SwipeAction:
+      type: string
+      enum:
+        - PASS
+        - LIKE
+        - SUPER_LIKE
+
+    FeedSwipeRequest:
+      type: object
+      required:
+        - targetUserId
+        - action
+      properties:
+        targetUserId:
+          type: string
+          format: uuid
+        action:
+          $ref: '#/components/schemas/SwipeAction'
+
+    FeedSwipeResult:
+      type: object
+      required:
+        - remainingLikesToday
+        - remainingSupersToday
+        - match
+        - bonusLikeCreditsRemaining
+      properties:
+        remainingLikesToday:
+          type: integer
+          description: Free daily likes remaining (UTC day), before bonus credits.
+        remainingSupersToday:
+          type: integer
+        bonusLikeCreditsRemaining:
+          type: integer
+          description: Purchased bonus likes remaining after this swipe.
+        match:
+          description: Present when this swipe created a mutual match; otherwise null.
+          nullable: true
+          type: object
+          properties:
+            matchId:
+              type: string
+              format: uuid
+            otherUserId:
+              type: string
+              format: uuid
+
+    FeedSwipeResultEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      properties:
+        data:
+          $ref: '#/components/schemas/FeedSwipeResult'
+        meta:
+          type: object
+          additionalProperties: true
+        error:
+          type: object
+          nullable: true
+
+    FeedQuotaSnapshot:
+      type: object
+      required:
+        - remainingLikesToday
+        - remainingSupersToday
+        - dailyLikeCap
+        - dailySuperLikeCap
+        - bonusLikeCredits
+        - alignmentBoostUntil
+        - locationPassUntil
+        - locationPassLabel
+      properties:
+        remainingLikesToday:
+          type: integer
+        remainingSupersToday:
+          type: integer
+        dailyLikeCap:
+          type: integer
+        dailySuperLikeCap:
+          type: integer
+        bonusLikeCredits:
+          type: integer
+        alignmentBoostUntil:
+          type: string
+          format: date-time
+          nullable: true
+        locationPassUntil:
+          type: string
+          format: date-time
+          nullable: true
+        locationPassLabel:
+          type: string
+          nullable: true
+
+    FeedQuotaSuccessEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      properties:
+        data:
+          $ref: '#/components/schemas/FeedQuotaSnapshot'
+        meta:
+          type: object
+          additionalProperties: true
+        error:
+          type: object
+          nullable: true
+
+    PurchaseValidateRequest:
+      type: object
+      required:
+        - platform
+        - productId
+      properties:
+        platform:
+          type: string
+          enum:
+            - ios
+            - android
+        productId:
+          type: string
+        receiptData:
+          type: string
+          nullable: true
+        transactionId:
+          type: string
+          nullable: true
+        destinationLabel:
+          type: string
+          nullable: true
+          description: Required for location pass products when applicable.
+
+    PurchaseRestoreItem:
+      type: object
+      required:
+        - platform
+        - productId
+      properties:
+        platform:
+          type: string
+          enum:
+            - ios
+            - android
+        productId:
+          type: string
+        transactionId:
+          type: string
+          nullable: true
+        receiptData:
+          type: string
+          nullable: true
+        destinationLabel:
+          type: string
+          nullable: true
+
+    PurchaseRestoreRequest:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PurchaseRestoreItem'
+
+    MismatchFocus:
+      type: string
+      enum:
+        - DYNAMIC
+        - PROFILE
+        - UNSPECIFIED
+
+    FeedMismatchRequest:
+      type: object
+      required:
+        - targetUserId
+        - focus
+      properties:
+        targetUserId:
+          type: string
+          format: uuid
+        focus:
+          $ref: '#/components/schemas/MismatchFocus'
+
+    MatchSummary:
+      type: object
+      required:
+        - matchId
+        - otherUserId
+        - otherEmail
+      properties:
+        matchId:
+          type: string
+          format: uuid
+        otherUserId:
+          type: string
+          format: uuid
+        otherEmail:
+          type: string
+          format: email
+
+    MatchListSuccessEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/MatchSummary'
+        meta:
+          type: object
+          additionalProperties: true
+        error:
+          type: object
+          nullable: true
+
+    MatchMessage:
+      type: object
+      required:
+        - id
+        - senderId
+        - body
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        senderId:
+          type: string
+          format: uuid
+        body:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    MatchMessagesSuccessEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/MatchMessage'
+        meta:
+          type: object
+          additionalProperties: true
+        error:
+          type: object
+          nullable: true
+
+    MatchMessageSuccessEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      properties:
+        data:
+          $ref: '#/components/schemas/MatchMessage'
+        meta:
+          type: object
+          additionalProperties: true
+        error:
+          type: object
+          nullable: true
+
+    SendMatchMessageBody:
+      type: object
+      required:
+        - body
+      properties:
+        body:
+          type: string
+          maxLength: 4000
+
+    ExpoPushTokenBody:
+      type: object
+      properties:
+        expoPushToken:
+          type: string
+          nullable: true
+          maxLength: 512
+
+    ApiError:
+      type: object
+      required:
+        - code
+        - message
+        - traceId
+      properties:
+        code:
+          type: string
+          description: |
+            Examples include `VALIDATION_ERROR`, `INVALID_CREDENTIALS`, `INVALID_REFRESH_TOKEN`,
+            `INVALID_RESET_TOKEN`, `AGE_REQUIREMENT_NOT_MET`, `EMAIL_ALREADY_EXISTS`,
+            `PROFILE_VALIDATION`, `RATE_LIMITED`, `QUOTA_EXCEEDED`, `SWIPE_TARGET_INVALID`,
+            `MATCH_NOT_FOUND`, `MATCH_ACCESS_DENIED`, `BILLING_VALIDATION_FAILED`, `BLOCKED_USER`,
+            `OPERATOR_AUTH_INVALID`, `ACCOUNT_RESTRICTED`, `ACCESS_DENIED`, `INTERNAL_ERROR`.
+        message:
+          type: string
+        details:
+          type: object
+          nullable: true
+          additionalProperties: true
+        traceId:
+          type: string
+
+    ErrorEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      properties:
+        data:
+          type: object
+          nullable: true
+        meta:
+          type: object
+          additionalProperties: true
+        error:
+          $ref: '#/components/schemas/ApiError'

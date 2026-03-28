@@ -1,0 +1,30 @@
+# Env & secrets
+.env
+.env.local
+.env.*.local
+*.pem
+
+# Dependencies & build
+node_modules/
+**/node_modules/
+target/
+**/build/
+dist/
+.expo/
+web-build/
+
+# IDE / OS
+.idea/
+.vscode/
+*.log
+.DS_Store
+
+# Mobile
+*.jks
+*.p8
+*.p12
+*.mobileprovision
+local.properties
+
+# Archives
+*.zip
