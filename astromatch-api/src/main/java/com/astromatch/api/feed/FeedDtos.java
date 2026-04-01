@@ -16,8 +16,12 @@ public final class FeedDtos {
 	public record FeedPhotoRef(String id, int sortOrder, String contentType) {
 	}
 
+	public record NatalPlanet(String planet, String symbol, String sign) {
+	}
+
 	public record FeedCandidateCard(UUID userId, String cosmicContext, String suggestedDynamicKey,
-			String suggestedDynamicTitle, String localityLine, String bioPreview, List<FeedPhotoRef> photos) {
+			String suggestedDynamicTitle, String localityLine, String bioPreview, List<FeedPhotoRef> photos,
+			List<String> redFlags, String firstName, int age, List<NatalPlanet> natalChart) {
 	}
 
 	public record FeedCandidatesEnvelope(List<FeedCandidateCard> candidates) {
@@ -36,5 +40,8 @@ public final class FeedDtos {
 	}
 
 	public record MismatchRequest(@NotNull UUID targetUserId, @NotNull MismatchFocus focus) {
+	}
+
+	public record PendingLikeDto(UUID userId, String firstName, String firstPhotoId) {
 	}
 }

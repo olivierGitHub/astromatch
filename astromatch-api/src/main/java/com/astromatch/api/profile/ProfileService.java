@@ -15,6 +15,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.astromatch.api.config.UploadProperties;
+import com.astromatch.api.identity.Attraction;
+import com.astromatch.api.identity.Gender;
 import com.astromatch.api.identity.User;
 import com.astromatch.api.identity.UserRepository;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -83,9 +85,53 @@ public class ProfileService {
 		}
 	}
 
+	public boolean isIdentityComplete(User u) {
+		return u.getGender() != null && u.getAttraction() != null;
+	}
+
 	public boolean isPresentationComplete(User u, long photoCount) {
 		boolean bioOk = u.getBio() != null && !u.getBio().isBlank();
 		return photoCount > 0 || bioOk;
+	}
+
+	@Transactional(readOnly = true)
+	public ProfileSnapshotDto getProfileSnapshot(UUID userId) {
+		User u = userRepository.findById(userId).orElseThrow();
+		List<String> flags = List.of();
+		if (u.getRedFlags() != null && !u.getRedFlags().isBlank()) {
+			try {
+				flags = objectMapper.readValue(u.getRedFlags(), new TypeReference<List<String>>() {});
+			} catch (IOException ignored) {}
+		}
+		return new ProfileSnapshotDto(u.getBio(), flags,
+				u.getBirthDate(), u.getBirthTime(), u.isBirthTimeUnknown(),
+				u.getBirthPlaceLabel(), u.getBirthTimezone());
+	}
+
+	@Transactional(readOnly = true)
+	public List<ProfilePhotoDto> listPhotos(UUID userId) {
+		return profilePhotoRepository.findByUserIdOrderBySortOrderAsc(userId).stream()
+				.map(p -> new ProfilePhotoDto(p.getId().toString(), p.getSortOrder(), p.getContentType()))
+				.toList();
+	}
+
+	@Transactional
+	public void reorderPhotos(UUID userId, List<String> orderedIds) {
+		if (orderedIds == null) {
+			return;
+		}
+		List<ProfilePhoto> existing = profilePhotoRepository.findByUserIdOrderBySortOrderAsc(userId);
+		for (int i = 0; i < orderedIds.size(); i++) {
+			final int order = i;
+			UUID id = UUID.fromString(orderedIds.get(i));
+			existing.stream()
+					.filter(p -> p.getId().equals(id))
+					.findFirst()
+					.ifPresent(p -> {
+						p.setSortOrder(order);
+						profilePhotoRepository.save(p);
+					});
+		}
 	}
 
 	@Transactional(readOnly = true)
@@ -125,6 +171,9 @@ public class ProfileService {
 		if (req.birthTimezone() == null || req.birthTimezone().isBlank()) {
 			throw new ProfileRequestException("Birth timezone is required.");
 		}
+		if (req.birthDate() != null) {
+			u.setBirthDate(req.birthDate());
+		}
 		u.setBirthTimeUnknown(req.birthTimeUnknown());
 		u.setBirthTime(req.birthTime());
 		u.setBirthPlaceLabel(req.birthPlaceLabel() != null ? req.birthPlaceLabel().trim() : null);
@@ -133,6 +182,19 @@ public class ProfileService {
 		u.setBirthTimezone(req.birthTimezone() != null ? req.birthTimezone().trim() : null);
 		if (!req.birthTimeUnknown() && req.birthTime() == null) {
 			throw new ProfileRequestException("Provide birth time or mark unknown.");
+		}
+		// Regenerate natal chart if birth date is available
+		if (u.getBirthDate() != null) {
+			try {
+				List<NatalChartCalculator.NatalPlanetData> chart = NatalChartCalculator.compute(u.getBirthDate());
+				// Serialize as [{"planet":"...","symbol":"...","sign":"..."}]
+				List<java.util.Map<String, String>> simplified = chart.stream()
+						.map(p -> java.util.Map.of("planet", p.planet(), "symbol", p.symbol(), "sign", p.sign()))
+						.toList();
+				u.setNatalChart(objectMapper.writeValueAsString(simplified));
+			} catch (IOException e) {
+				// Non-blocking — birth data is saved, chart regeneration failed silently
+			}
 		}
 		userRepository.save(u);
 	}
@@ -175,6 +237,40 @@ public class ProfileService {
 			throw new ProfileRequestException("Bio must be at most 2000 characters.");
 		}
 		u.setBio(bio != null ? bio.trim() : null);
+		userRepository.save(u);
+	}
+
+	@Transactional
+	public void updateNatalChart(UUID userId, String natalChartJson) {
+		User u = userRepository.findById(userId).orElseThrow();
+		u.setNatalChart(natalChartJson);
+		userRepository.save(u);
+	}
+
+	@Transactional
+	public void updateFirstName(UUID userId, String firstName) {
+		if (firstName == null || firstName.isBlank()) {
+			throw new ProfileRequestException("First name is required.");
+		}
+		if (firstName.length() > 128) {
+			throw new ProfileRequestException("First name must be at most 128 characters.");
+		}
+		User u = userRepository.findById(userId).orElseThrow();
+		u.setFirstName(firstName.trim());
+		userRepository.save(u);
+	}
+
+	@Transactional
+	public void updateRedFlags(UUID userId, List<String> flags) {
+		if (flags == null || flags.size() > 3) {
+			throw new ProfileRequestException("Red flags must be a list of at most 3 items.");
+		}
+		User u = userRepository.findById(userId).orElseThrow();
+		try {
+			u.setRedFlags(flags.isEmpty() ? null : objectMapper.writeValueAsString(flags));
+		} catch (IOException e) {
+			throw new ProfileRequestException("Could not save red flags");
+		}
 		userRepository.save(u);
 	}
 
@@ -230,11 +326,28 @@ public class ProfileService {
 	}
 
 	@Transactional
+	public void updateIdentity(UUID userId, Gender gender, Attraction attraction) {
+		if (gender == null) {
+			throw new ProfileRequestException("Gender is required.");
+		}
+		if (attraction == null) {
+			throw new ProfileRequestException("Attraction is required.");
+		}
+		User u = userRepository.findById(userId).orElseThrow();
+		u.setGender(gender);
+		u.setAttraction(attraction);
+		userRepository.save(u);
+	}
+
+	@Transactional
 	public void completeOnboarding(UUID userId) {
 		User u = userRepository.findById(userId).orElseThrow();
 		long photos = profilePhotoRepository.countByUserId(userId);
-		if (!isBirthProfileComplete(u) || !isLocationComplete(u) || !isDynamicsComplete(u) || !isPresentationComplete(u, photos)) {
-			throw new ProfileRequestException("Complete birth, location, dynamics, and bio or at least one photo first.");
+		if (u.getFirstName() == null || u.getFirstName().isBlank()) {
+			throw new ProfileRequestException("First name is required.");
+		}
+		if (!isIdentityComplete(u) || !isBirthProfileComplete(u) || !isLocationComplete(u) || !isDynamicsComplete(u) || !isPresentationComplete(u, photos)) {
+			throw new ProfileRequestException("Complete identity, birth, location, dynamics, and bio or at least one photo first.");
 		}
 		Map<String, Boolean> consents = getConsents(userId);
 		if (!Boolean.TRUE.equals(consents.get("privacy_ack"))) {
@@ -262,12 +375,17 @@ public class ProfileService {
 		userRepository.save(u);
 	}
 
+	public record ProfileSnapshotDto(String bio, List<String> redFlags,
+			java.time.LocalDate birthDate, java.time.LocalTime birthTime, boolean birthTimeUnknown,
+			String birthPlaceLabel, String birthTimezone) {
+	}
+
 	public record MeReadinessDto(boolean onboardingCompleted, boolean birthProfileComplete, boolean locationComplete,
 			boolean dynamicsComplete, boolean presentationComplete) {
 	}
 
-	public record UpdateBirthRequest(boolean birthTimeUnknown, LocalTime birthTime, String birthPlaceLabel,
-			Double birthPlaceLat, Double birthPlaceLng, String birthTimezone) {
+	public record UpdateBirthRequest(java.time.LocalDate birthDate, boolean birthTimeUnknown, LocalTime birthTime,
+			String birthPlaceLabel, Double birthPlaceLat, Double birthPlaceLng, String birthTimezone) {
 	}
 
 	public record UpdateLocationRequest(String label, Double lat, Double lng, boolean manual) {

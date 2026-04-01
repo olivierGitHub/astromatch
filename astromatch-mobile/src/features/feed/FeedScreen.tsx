@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, Animated, Dimensions, PanResponder, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 import { colors, radius, spacing, typography } from '../../design-system';
 import {
@@ -21,7 +22,9 @@ import { MatchCelebrationModal } from './MatchCelebrationModal';
 import { MismatchSheet } from './MismatchSheet';
 import { QuotaGateModal } from './QuotaGateModal';
 import { SessionCard } from './SessionCard';
-import { SwipeActionDock } from './SwipeActionDock';
+
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const SWIPE_THRESHOLD = 80;
 
 type FeedProps = {
   onOpenChat: (matchId: string, otherUserId: string) => void;
@@ -50,6 +53,68 @@ export function FeedScreen({ onOpenChat, onOpenBilling, billingRefreshToken = 0 
   const [quotaGateOpen, setQuotaGateOpen] = useState(false);
   const [quotaGateMessage, setQuotaGateMessage] = useState('');
 
+  // Swipe animation
+  const cardX = useRef(new Animated.Value(0)).current;
+  const swipingRef = useRef(false);
+  const busyRef = useRef(false);
+  // Always points to the current candidate — updated every render, readable in static PanResponder
+  const currentRef = useRef<FeedCandidateCard | null>(null);
+  const fireSwipeRef = useRef<((userId: string, action: SwipeAction) => void) | null>(null);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) =>
+        !swipingRef.current &&
+        Math.abs(g.dx) > 10 &&
+        Math.abs(g.dx) > Math.abs(g.dy) * 2,
+      onMoveShouldSetPanResponderCapture: (_, g) =>
+        !swipingRef.current &&
+        Math.abs(g.dx) > 10 &&
+        Math.abs(g.dx) > Math.abs(g.dy) * 2,
+      onPanResponderMove: (_, g) => {
+        cardX.setValue(g.dx);
+      },
+      onPanResponderRelease: (_, g) => {
+        if (swipingRef.current) return;
+
+        const goRight = g.dx > SWIPE_THRESHOLD || (g.dx > 20 && g.vx > 0.8);
+        const goLeft = g.dx < -SWIPE_THRESHOLD || (g.dx < -20 && g.vx < -0.8);
+
+        if (goRight) {
+          // Capture userId synchronously before the 250ms animation
+          const uid = currentRef.current?.userId;
+          if (!uid) return;
+          swipingRef.current = true;
+          Animated.timing(cardX, {
+            toValue: SCREEN_WIDTH * 1.5,
+            duration: 250,
+            useNativeDriver: true,
+          }).start(() => {
+            swipingRef.current = false;
+            fireSwipeRef.current?.(uid, 'LIKE');
+          });
+        } else if (goLeft) {
+          const uid = currentRef.current?.userId;
+          if (!uid) return;
+          swipingRef.current = true;
+          Animated.timing(cardX, {
+            toValue: -SCREEN_WIDTH * 1.5,
+            duration: 250,
+            useNativeDriver: true,
+          }).start(() => {
+            swipingRef.current = false;
+            fireSwipeRef.current?.(uid, 'PASS');
+          });
+        } else {
+          Animated.spring(cardX, {
+            toValue: 0,
+            useNativeDriver: true,
+          }).start();
+        }
+      },
+    })
+  ).current;
+
   const load = useCallback(async () => {
     setLoading(true);
     setErr(null);
@@ -73,7 +138,15 @@ export function FeedScreen({ onOpenChat, onOpenBilling, billingRefreshToken = 0 
     load();
   }, [load]);
 
-  const current = candidates[0];
+  const current = candidates[0] ?? null;
+  // Keep currentRef in sync on every render so PanResponder can read it
+  currentRef.current = current;
+
+  const currentUserId = current?.userId;
+  useEffect(() => {
+    cardX.setValue(0);
+    swipingRef.current = false;
+  }, [currentUserId, cardX]);
 
   const openSafetyMenu = () => {
     if (!current) return;
@@ -147,47 +220,53 @@ export function FeedScreen({ onOpenChat, onOpenBilling, billingRefreshToken = 0 
     ]);
   };
 
-  const onSwipe = async (action: SwipeAction) => {
-    if (!current) return;
-    setBusy(true);
-    try {
-      const result = await postFeedSwipe(current.userId, action);
-      setCandidates((prev) => prev.filter((c) => c.userId !== current.userId));
-      setQuota((prev) =>
-        prev
-          ? {
-              ...prev,
-              remainingLikesToday: result.remainingLikesToday,
-              remainingSupersToday: result.remainingSupersToday,
-              bonusLikeCredits: result.bonusLikeCreditsRemaining,
-            }
-          : prev,
-      );
-      if (result.match) {
-        setPendingMatch(result.match);
-      }
-    } catch (e) {
-      if (e instanceof RegistrationApiError) {
-        const err = e.envelope.error;
-        if (!err) {
-          Alert.alert('Something went wrong', 'Try again.');
-          return;
-        }
-        const { code, message, traceId } = err;
-        const detail = traceId ? `${message}\nTrace: ${traceId}` : message;
-        if (code === 'QUOTA_EXCEEDED') {
-          setQuotaGateMessage(message);
-          setQuotaGateOpen(true);
-        } else if (code === 'RATE_LIMITED') {
-          Alert.alert('Slow down', detail);
+  // Optimistic swipe: removes the card immediately, fires API in background.
+  // Used by gesture swipes. userId captured synchronously at gesture release time.
+  const fireSwipe = useCallback((userId: string, action: SwipeAction) => {
+    setCandidates((prev) => prev.filter((c) => c.userId !== userId));
+    postFeedSwipe(userId, action)
+      .then((result) => {
+        setQuota((prev) =>
+          prev
+            ? {
+                ...prev,
+                remainingLikesToday: result.remainingLikesToday,
+                remainingSupersToday: result.remainingSupersToday,
+                bonusLikeCredits: result.bonusLikeCreditsRemaining,
+              }
+            : prev,
+        );
+        if (result.match) setPendingMatch(result.match);
+      })
+      .catch((e) => {
+        if (e instanceof RegistrationApiError) {
+          const err = e.envelope.error;
+          if (err?.code === 'QUOTA_EXCEEDED') {
+            setQuotaGateMessage(err.message);
+            setQuotaGateOpen(true);
+          } else if (err?.code === 'RATE_LIMITED') {
+            Alert.alert('Slow down', err.message);
+          } else {
+            Alert.alert('Something went wrong', err?.message ?? 'Try again.');
+          }
         } else {
-          Alert.alert('Something went wrong', detail);
+          Alert.alert('Something went wrong', 'Try again.');
         }
-      } else {
-        Alert.alert('Something went wrong', 'Try again.');
-      }
+      });
+  }, []);
+  fireSwipeRef.current = fireSwipe;
+
+  // Used by the SUPER_LIKE button (keeps busy state to disable the button)
+  const onSwipe = async (action: SwipeAction) => {
+    const uid = currentRef.current?.userId;
+    if (!uid || busy) return;
+    setBusy(true);
+    busyRef.current = true;
+    try {
+      fireSwipe(uid, action);
     } finally {
       setBusy(false);
+      busyRef.current = false;
     }
   };
 
@@ -202,7 +281,7 @@ export function FeedScreen({ onOpenChat, onOpenBilling, billingRefreshToken = 0 
   if (err) {
     return (
       <View style={styles.centered}>
-        <Text style={styles.errorTitle}>We couldn’t refresh your feed</Text>
+        <Text style={styles.errorTitle}>We couldn't refresh your feed</Text>
         <Text style={styles.errorBody}>{err}</Text>
         <Pressable
           style={({ pressed }) => [styles.retry, pressed && styles.retryPressed]}
@@ -219,9 +298,9 @@ export function FeedScreen({ onOpenChat, onOpenBilling, billingRefreshToken = 0 
   if (!current) {
     return (
       <View style={styles.centered}>
-        <Text style={styles.emptyTitle}>You’re all caught up</Text>
+        <Text style={styles.emptyTitle}>You're all caught up</Text>
         <Text style={styles.emptyBody}>
-          New people will appear here as the community grows. Take a breath—what you’re seeking is also seeking
+          New people will appear here as the community grows. Take a breath—what you're seeking is also seeking
           connection.
         </Text>
         <Pressable
@@ -236,36 +315,63 @@ export function FeedScreen({ onOpenChat, onOpenBilling, billingRefreshToken = 0 
     );
   }
 
-  const likeDisabled =
-    quota != null && quota.remainingLikesToday <= 0 && quota.bonusLikeCredits <= 0;
   const superDisabled = quota != null && quota.remainingSupersToday <= 0;
+
+  const cardRotation = cardX.interpolate({
+    inputRange: [-SCREEN_WIDTH / 2, 0, SCREEN_WIDTH / 2],
+    outputRange: ['-10deg', '0deg', '10deg'],
+    extrapolate: 'clamp',
+  });
+  const likeOpacity = cardX.interpolate({
+    inputRange: [0, 60],
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
+  });
+  const passOpacity = cardX.interpolate({
+    inputRange: [-60, 0],
+    outputRange: [1, 0],
+    extrapolate: 'clamp',
+  });
 
   return (
     <>
       <View style={styles.root}>
-        {quota ? (
-          <Text style={styles.quotaLine} accessibilityLabel="Swipe allowance summary">
-            Free likes: {quota.remainingLikesToday}/{quota.dailyLikeCap} · Supers: {quota.remainingSupersToday}/
-            {quota.dailySuperLikeCap}
-            {quota.bonusLikeCredits > 0 ? ` · Bonus likes: ${quota.bonusLikeCredits}` : ''}
-          </Text>
-        ) : null}
-        <SessionCard card={current} />
-        <Pressable
-          style={({ pressed }) => [styles.safetyLink, pressed && styles.safetyLinkPressed]}
-          onPress={openSafetyMenu}
-          accessibilityRole="button"
-          accessibilityLabel="Report or block this profile"
+        <Animated.View
+          style={[
+            styles.cardWrapper,
+            { transform: [{ translateX: cardX }, { rotate: cardRotation }] },
+          ]}
+          {...panResponder.panHandlers}
         >
-          <Text style={styles.safetyLinkText}>Report or block</Text>
-        </Pressable>
-        <SwipeActionDock
-          busy={busy}
-          onAction={onSwipe}
-          onMismatch={() => setMismatchOpen(true)}
-          likeDisabled={likeDisabled}
-          superDisabled={superDisabled}
-        />
+          <Animated.View
+            style={[styles.swipeLabel, styles.swipeLabelLike, { opacity: likeOpacity }]}
+            pointerEvents="none"
+          >
+            <Text style={[styles.swipeLabelText, styles.swipeLabelLikeText]}>LIKE</Text>
+          </Animated.View>
+          <Animated.View
+            style={[styles.swipeLabel, styles.swipeLabelPass, { opacity: passOpacity }]}
+            pointerEvents="none"
+          >
+            <Text style={[styles.swipeLabelText, styles.swipeLabelPassText]}>PASS</Text>
+          </Animated.View>
+          <SessionCard
+            card={current}
+            onSafetyMenu={openSafetyMenu}
+            onMismatch={() => setMismatchOpen(true)}
+          />
+          <View style={styles.superBtnContainer} pointerEvents="box-none">
+            <Pressable
+              style={({ pressed }) => [styles.superBtn, pressed && styles.superBtnPressed, (busy || superDisabled) && styles.superBtnDim]}
+              onPress={() => onSwipe('SUPER_LIKE')}
+              disabled={busy || superDisabled}
+              accessibilityRole="button"
+              accessibilityLabel="Super like"
+            >
+              <Ionicons name="sparkles" size={28} color="#FFFFFF" />
+            </Pressable>
+          </View>
+        </Animated.View>
       </View>
       <QuotaGateModal
         visible={quotaGateOpen}
@@ -304,7 +410,7 @@ export function FeedScreen({ onOpenChat, onOpenBilling, billingRefreshToken = 0 
             await enqueueMismatch({ targetUserId: current.userId, focus });
             Alert.alert(
               'Saved offline',
-              'We’ll send this when you’re back online. You can keep exploring.',
+              "We'll send this when you're back online. You can keep exploring.",
             );
           }
           setCandidates((prev) => prev.filter((c) => c.userId !== current.userId));
@@ -329,24 +435,66 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
   },
-  quotaLine: {
-    color: colors.textMuted,
-    fontSize: typography.caption.fontSize,
-    marginBottom: spacing.scale[2],
+  cardWrapper: {
+    flex: 1,
   },
-  safetyLink: {
-    alignSelf: 'flex-start',
-    paddingVertical: spacing.scale[1],
-    marginBottom: spacing.scale[1],
+  superBtnContainer: {
+    position: 'absolute',
+    bottom: spacing.scale[4],
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 20,
   },
-  safetyLinkPressed: {
+  superBtn: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  superBtnPressed: {
     opacity: 0.85,
+    transform: [{ scale: 0.95 }],
   },
-  safetyLinkText: {
+  superBtnDim: {
+    opacity: 0.4,
+  },
+  swipeLabel: {
+    position: 'absolute',
+    top: spacing.scale[3],
+    zIndex: 10,
+    paddingHorizontal: spacing.scale[2],
+    paddingVertical: spacing.scale[1],
+    borderRadius: radius.secondary,
+    borderWidth: 3,
+  },
+  swipeLabelLike: {
+    left: spacing.scale[3],
+    borderColor: colors.secondary,
+    backgroundColor: 'rgba(20, 184, 166, 0.15)',
+  },
+  swipeLabelPass: {
+    right: spacing.scale[3],
+    borderColor: '#EF4444',
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+  },
+  swipeLabelText: {
+    fontSize: typography.h3.fontSize,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+  swipeLabelLikeText: {
     color: colors.secondary,
-    fontSize: typography.caption.fontSize,
-    fontWeight: '600',
-    textDecorationLine: 'underline',
+  },
+  swipeLabelPassText: {
+    color: '#EF4444',
   },
   centered: {
     flex: 1,

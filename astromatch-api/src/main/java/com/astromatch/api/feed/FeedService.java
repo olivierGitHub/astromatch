@@ -2,6 +2,8 @@ package com.astromatch.api.feed;
 
 import java.io.IOException;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.Period;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -15,6 +17,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.astromatch.api.config.FeedProperties;
 import com.astromatch.api.config.SlidingWindowRateLimiter;
+import com.astromatch.api.identity.Attraction;
+import com.astromatch.api.identity.Gender;
 import com.astromatch.api.identity.RateLimitExceededException;
 import com.astromatch.api.identity.User;
 import com.astromatch.api.identity.UserRepository;
@@ -76,11 +80,53 @@ public class FeedService {
 	}
 
 	@Transactional(readOnly = true)
+	public List<FeedDtos.PendingLikeDto> getPendingLikes(UUID userId) {
+		List<SwipeAction> likeActions = List.of(SwipeAction.LIKE, SwipeAction.SUPER_LIKE);
+		List<SwipeEvent> inbound = swipeEventRepository.findByTargetUserIdAndActionIn(userId, likeActions);
+
+		List<FeedDtos.PendingLikeDto> result = new ArrayList<>();
+		for (SwipeEvent ev : inbound) {
+			UUID likerId = ev.getViewerId();
+			// Skip if already swiped back (match already created or already passed)
+			if (swipeEventRepository.existsByViewerIdAndTargetUserId(userId, likerId)) {
+				continue;
+			}
+			// Skip blocked
+			if (userBlockRepository.existsEitherDirection(userId, likerId)) {
+				continue;
+			}
+			User liker = userRepository.findById(likerId).orElse(null);
+			if (liker == null || !liker.isOnboardingCompleted()) {
+				continue;
+			}
+			List<ProfilePhoto> photos = profilePhotoRepository.findByUserIdOrderBySortOrderAsc(likerId);
+			String firstPhotoId = photos.isEmpty() ? null : photos.get(0).getId().toString();
+			result.add(new FeedDtos.PendingLikeDto(likerId, liker.getFirstName(), firstPhotoId));
+		}
+		return result;
+	}
+
+	@Transactional(readOnly = true)
+	public FeedDtos.FeedCandidateCard buildPreviewCard(UUID userId) {
+		User u = userRepository.findById(userId).orElseThrow();
+		return toCard(userId, u);
+	}
+
+	@Transactional(readOnly = true)
+	public FeedDtos.FeedCandidateCard buildProfileCard(UUID viewerId, UUID targetId) {
+		User target = userRepository.findById(targetId).orElseThrow();
+		return toCard(viewerId, target);
+	}
+
+	@Transactional(readOnly = true)
 	public FeedDtos.FeedCandidatesEnvelope listCandidates(UUID viewerId) {
 		User viewer = userRepository.findById(viewerId).orElseThrow();
 		List<User> raw = userRepository.findByOnboardingCompletedTrueAndIdNot(viewerId);
 		List<User> open = new ArrayList<>();
 		for (User u : raw) {
+			if (!isCompatible(viewer, u)) {
+				continue;
+			}
 			if (userBlockRepository.existsEitherDirection(viewerId, u.getId())) {
 				continue;
 			}
@@ -253,7 +299,14 @@ public class FeedService {
 		for (ProfilePhoto p : photos) {
 			refs.add(new FeedDtos.FeedPhotoRef(p.getId().toString(), p.getSortOrder(), p.getContentType()));
 		}
-		return new FeedDtos.FeedCandidateCard(u.getId(), cosmic, dynKey, dynTitle, locality, bioPreview, refs);
+		List<String> redFlags = parseStringList(u.getRedFlags());
+		String firstName = u.getFirstName() != null ? u.getFirstName() : "";
+		int age = u.getBirthDate() != null
+				? Period.between(u.getBirthDate(), LocalDate.now(ZoneOffset.UTC)).getYears()
+				: 0;
+		List<FeedDtos.NatalPlanet> natalChart = parseNatalChart(u.getNatalChart());
+		return new FeedDtos.FeedCandidateCard(u.getId(), cosmic, dynKey, dynTitle, locality, bioPreview, refs, redFlags,
+				firstName, age, natalChart);
 	}
 
 	private String firstDynamicKey(User u) {
@@ -272,6 +325,49 @@ public class FeedService {
 			// fall through
 		}
 		return "deep_connection";
+	}
+
+	private List<String> parseStringList(String raw) {
+		if (raw == null || raw.isBlank()) return List.of();
+		try {
+			return objectMapper.readValue(raw, new TypeReference<List<String>>() {});
+		} catch (Exception ignored) {
+			return List.of();
+		}
+	}
+
+	private List<FeedDtos.NatalPlanet> parseNatalChart(String raw) {
+		if (raw == null || raw.isBlank()) return List.of();
+		try {
+			return objectMapper.readValue(raw, new TypeReference<List<FeedDtos.NatalPlanet>>() {});
+		} catch (Exception ignored) {
+			return List.of();
+		}
+	}
+
+	/**
+	 * Mutual compatibility: viewer's attraction must include candidate's gender, and vice-versa.
+	 * If either profile has no gender/attraction set yet, we don't filter them out (backwards compat).
+	 */
+	private static boolean isCompatible(User viewer, User candidate) {
+		// Viewer hasn't set their identity yet → show all profiles (backwards compat)
+		if (viewer.getGender() == null || viewer.getAttraction() == null) {
+			return true;
+		}
+		// Viewer has identity set → candidate must also have identity to appear
+		if (candidate.getGender() == null || candidate.getAttraction() == null) {
+			return false;
+		}
+		return attractionMatches(viewer.getAttraction(), candidate.getGender())
+				&& attractionMatches(candidate.getAttraction(), viewer.getGender());
+	}
+
+	private static boolean attractionMatches(Attraction attraction, Gender gender) {
+		return switch (attraction) {
+			case ALL -> true;
+			case MEN -> gender == Gender.MALE;
+			case WOMEN -> gender == Gender.FEMALE;
+		};
 	}
 
 	private static String humanize(String key) {

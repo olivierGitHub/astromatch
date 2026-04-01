@@ -39,17 +39,23 @@ public class AccountStatusFilter extends OncePerRequestFilter {
 		Authentication auth = SecurityContextHolder.getContext().getAuthentication();
 		if (auth != null && auth.isAuthenticated() && auth.getPrincipal() instanceof UUID userId) {
 			var userOpt = userRepository.findById(userId);
-			if (userOpt.isPresent()) {
-				AccountStatus st = userOpt.get().getAccountStatus();
-				if (st == AccountStatus.SUSPENDED || st == AccountStatus.BANNED) {
-					String traceId = traceAttr(request);
-					String msg = st == AccountStatus.BANNED ? "Account is banned." : "Account is suspended.";
-					var err = new ApiError("ACCOUNT_RESTRICTED", msg, null, traceId);
-					response.setStatus(HttpServletResponse.SC_FORBIDDEN);
-					response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-					objectMapper.writeValue(response.getOutputStream(), ApiEnvelope.error(err));
-					return;
-				}
+			if (userOpt.isEmpty()) {
+				String traceId = traceAttr(request);
+				var err = new ApiError("ACCOUNT_NOT_FOUND", "Account not found.", null, traceId);
+				response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+				response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+				objectMapper.writeValue(response.getOutputStream(), ApiEnvelope.error(err));
+				return;
+			}
+			AccountStatus st = userOpt.get().getAccountStatus();
+			if (st == AccountStatus.SUSPENDED || st == AccountStatus.BANNED) {
+				String traceId = traceAttr(request);
+				String msg = st == AccountStatus.BANNED ? "Account is banned." : "Account is suspended.";
+				var err = new ApiError("ACCOUNT_RESTRICTED", msg, null, traceId);
+				response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+				response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+				objectMapper.writeValue(response.getOutputStream(), ApiEnvelope.error(err));
+				return;
 			}
 		}
 		filterChain.doFilter(request, response);

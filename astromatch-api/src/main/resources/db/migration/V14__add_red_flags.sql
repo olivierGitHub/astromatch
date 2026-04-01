@@ -1,0 +1,1 @@
+ALTER TABLE users ADD COLUMN red_flags VARCHAR(512) NULL;

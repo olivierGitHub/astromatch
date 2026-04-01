@@ -11,6 +11,9 @@ import com.astromatch.api.feed.SwipeAction;
 import com.astromatch.api.feed.SwipeEventRepository;
 import com.astromatch.api.identity.User;
 import com.astromatch.api.identity.UserRepository;
+import com.astromatch.api.profile.NatalChartCalculator;
+import com.astromatch.api.profile.ProfilePhoto;
+import com.astromatch.api.profile.ProfilePhotoRepository;
 import com.astromatch.api.safety.UserBlockRepository;
 
 @Service
@@ -21,15 +24,20 @@ public class MatchService {
 	private final UserRepository userRepository;
 	private final UserBlockRepository userBlockRepository;
 	private final PushNotificationService pushNotificationService;
+	private final ProfilePhotoRepository profilePhotoRepository;
+	private final MatchMessageRepository matchMessageRepository;
 
 	public MatchService(MatchRepository matchRepository, SwipeEventRepository swipeEventRepository,
 			UserRepository userRepository, UserBlockRepository userBlockRepository,
-			PushNotificationService pushNotificationService) {
+			PushNotificationService pushNotificationService, ProfilePhotoRepository profilePhotoRepository,
+			MatchMessageRepository matchMessageRepository) {
 		this.matchRepository = matchRepository;
 		this.swipeEventRepository = swipeEventRepository;
 		this.userRepository = userRepository;
 		this.userBlockRepository = userBlockRepository;
 		this.pushNotificationService = pushNotificationService;
+		this.profilePhotoRepository = profilePhotoRepository;
+		this.matchMessageRepository = matchMessageRepository;
 	}
 
 	/**
@@ -53,7 +61,20 @@ public class MatchService {
 		m.setUserHigh(high);
 		matchRepository.save(m);
 		pushNotificationService.notifyNewMatch(m.getId(), swiperId, targetId);
-		return new MatchDtos.MatchCreatedDto(m.getId().toString(), targetId.toString());
+
+		User swiper = userRepository.findById(swiperId).orElse(null);
+		User target = userRepository.findById(targetId).orElse(null);
+
+		List<ProfilePhoto> swiperPhotos = profilePhotoRepository.findByUserIdOrderBySortOrderAsc(swiperId);
+		List<ProfilePhoto> targetPhotos = profilePhotoRepository.findByUserIdOrderBySortOrderAsc(targetId);
+		String myPhotoId = swiperPhotos.isEmpty() ? null : swiperPhotos.get(0).getId().toString();
+		String otherPhotoId = targetPhotos.isEmpty() ? null : targetPhotos.get(0).getId().toString();
+
+		String mySunSign = sunSignSymbol(swiper);
+		String otherSunSign = sunSignSymbol(target);
+
+		return new MatchDtos.MatchCreatedDto(m.getId().toString(), targetId.toString(),
+				myPhotoId, otherPhotoId, mySunSign, otherSunSign);
 	}
 
 	@Transactional(readOnly = true)
@@ -67,9 +88,31 @@ public class MatchService {
 			}
 			User u = userRepository.findById(other).orElse(null);
 			String email = u != null ? u.getEmail() : "unknown@invalid";
-			out.add(new MatchDtos.MatchSummaryDto(m.getId().toString(), other.toString(), email));
+			String firstName = u != null && u.getFirstName() != null ? u.getFirstName() : "";
+			List<ProfilePhoto> photos = profilePhotoRepository.findByUserIdOrderBySortOrderAsc(other);
+			String firstPhotoId = photos.isEmpty() ? null : photos.get(0).getId().toString();
+			MatchMessage last = matchMessageRepository.findFirstByMatchIdOrderByCreatedAtDesc(m.getId()).orElse(null);
+			String lastBody = last != null ? last.getBody() : null;
+			String lastSenderId = last != null ? last.getSenderId().toString() : null;
+			out.add(new MatchDtos.MatchSummaryDto(m.getId().toString(), other.toString(), email, firstName, firstPhotoId, lastBody, lastSenderId));
 		}
 		return out;
+	}
+
+	private String sunSignSymbol(User user) {
+		if (user == null || user.getBirthDate() == null) {
+			return null;
+		}
+		return NatalChartCalculator.compute(user.getBirthDate()).get(0).signSymbol();
+	}
+
+	@Transactional(readOnly = true)
+	public void assertHaveMatch(UUID userId, UUID otherUserId) {
+		UUID low = userId.compareTo(otherUserId) < 0 ? userId : otherUserId;
+		UUID high = userId.compareTo(otherUserId) < 0 ? otherUserId : userId;
+		if (matchRepository.findByUserLowAndUserHigh(low, high).isEmpty()) {
+			throw new MatchNotFoundException();
+		}
 	}
 
 	@Transactional(readOnly = true)

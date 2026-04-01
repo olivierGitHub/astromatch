@@ -10,18 +10,22 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { BirthForm, type BirthValues, parseDateForApi } from '../profile/BirthForm';
 
 import { colors, radius, spacing, typography } from '../../design-system';
 import {
   DYNAMIC_LABELS,
+  type Attraction,
+  type Gender,
   completeOnboarding,
   fetchPrivacyNotice,
   putBio,
   putBirthProfile,
   putConsents,
   putDynamics,
+  putFirstName,
+  putIdentity,
   putLocationProfile,
-  searchPlaces,
   uploadProfilePhoto,
 } from '../../services/api-client/profile-onboarding';
 import { RegistrationApiError } from '../../services/api-client/types';
@@ -31,7 +35,7 @@ type Props = {
   onComplete: () => void;
 };
 
-const STEPS = ['Privacy', 'Birth', 'Location', 'Dynamics', 'Profile', 'Finish'] as const;
+const STEPS = ['Privacy', 'Identity', 'Name', 'Birth', 'Location', 'Dynamics', 'Profile', 'Finish'] as const;
 
 export function OnboardingFlow({ email, onComplete }: Props) {
   const [step, setStep] = useState(0);
@@ -39,12 +43,18 @@ export function OnboardingFlow({ email, onComplete }: Props) {
   const [err, setErr] = useState<string | null>(null);
   const [privacyText, setPrivacyText] = useState<string>('');
 
-  const [birthUnknown, setBirthUnknown] = useState(true);
-  const [birthTime, setBirthTime] = useState('');
-  const [birthPlace, setBirthPlace] = useState('');
-  const [birthTz, setBirthTz] = useState('Europe/Paris');
-  const [placeQuery, setPlaceQuery] = useState('');
-  const [placeHits, setPlaceHits] = useState<{ label: string; lat: number; lng: number; timezone: string }[]>([]);
+  const [gender, setGender] = useState<Gender | null>(null);
+  const [attraction, setAttraction] = useState<Attraction | null>(null);
+  const [firstName, setFirstName] = useState('');
+
+  const [birth, setBirth] = useState<BirthValues>({
+    birthDate: '',
+    birthTimeUnknown: true,
+    birthTime: '',
+    birthPlaceLabel: '',
+    birthTimezone: 'Europe/Paris',
+  });
+  const [birthErr, setBirthErr] = useState<string | null>(null);
 
   const [locManual, setLocManual] = useState(true);
   const [locLabel, setLocLabel] = useState('');
@@ -70,10 +80,6 @@ export function OnboardingFlow({ email, onComplete }: Props) {
     });
   };
 
-  const loadPlaces = useCallback(async () => {
-    const hits = await searchPlaces(placeQuery);
-    setPlaceHits(hits);
-  }, [placeQuery]);
 
   const nextFromPrivacy = async () => {
     setErr(null);
@@ -88,23 +94,72 @@ export function OnboardingFlow({ email, onComplete }: Props) {
     }
   };
 
+  const nextFromIdentity = async () => {
+    setErr(null);
+    if (!gender) {
+      setErr('Choisis ton sexe.');
+      return;
+    }
+    if (!attraction) {
+      setErr('Choisis ton attirance.');
+      return;
+    }
+    setLoading(true);
+    try {
+      await putIdentity(gender, attraction);
+      setStep(2);
+    } catch (e) {
+      setErr(e instanceof RegistrationApiError ? e.envelope.error?.message ?? 'Error' : 'Error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const nextFromName = async () => {
+    setErr(null);
+    if (!firstName.trim()) {
+      setErr('Saisis ton prénom.');
+      return;
+    }
+    setLoading(true);
+    try {
+      await putFirstName(firstName.trim());
+      setStep(3);
+    } catch (e) {
+      setErr(e instanceof RegistrationApiError ? e.envelope.error?.message ?? 'Error' : 'Error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const nextFromBirth = async () => {
     setErr(null);
-    if (!birthPlace.trim() || !birthTz.trim()) {
-      setErr('Birth place and timezone are required.');
+    setBirthErr(null);
+    const dateForApi = parseDateForApi(birth.birthDate);
+    if (!dateForApi) {
+      setBirthErr('Date invalide — format JJ/MM/AAAA attendu.');
+      return;
+    }
+    if (!birth.birthPlaceLabel.trim()) {
+      setBirthErr('Ville de naissance requise.');
+      return;
+    }
+    if (!birth.birthTimeUnknown && !birth.birthTime.trim()) {
+      setBirthErr('Heure requise ou coche « inconnue ».');
       return;
     }
     setLoading(true);
     try {
       await putBirthProfile({
-        birthTimeUnknown: birthUnknown,
-        birthTime: birthUnknown ? null : birthTime.trim() || null,
-        birthPlaceLabel: birthPlace.trim(),
+        birthDate: dateForApi,
+        birthTimeUnknown: birth.birthTimeUnknown,
+        birthTime: birth.birthTimeUnknown ? null : birth.birthTime.trim() || null,
+        birthPlaceLabel: birth.birthPlaceLabel.trim(),
         birthPlaceLat: null,
         birthPlaceLng: null,
-        birthTimezone: birthTz.trim(),
+        birthTimezone: birth.birthTimezone || 'Europe/Paris',
       });
-      setStep(2);
+      setStep(4);
     } catch (e) {
       setErr(e instanceof RegistrationApiError ? e.envelope.error?.message ?? 'Error' : 'Error');
     } finally {
@@ -142,7 +197,7 @@ export function OnboardingFlow({ email, onComplete }: Props) {
     setLoading(true);
     try {
       await putLocationProfile({ label: locLabel.trim(), lat: locLat, lng: locLng, manual: locManual });
-      setStep(3);
+      setStep(5);
     } catch (e) {
       setErr(e instanceof RegistrationApiError ? e.envelope.error?.message ?? 'Error' : 'Error');
     } finally {
@@ -159,7 +214,7 @@ export function OnboardingFlow({ email, onComplete }: Props) {
     setLoading(true);
     try {
       await putDynamics(selectedDynamics);
-      setStep(4);
+      setStep(6);
     } catch (e) {
       setErr(e instanceof RegistrationApiError ? e.envelope.error?.message ?? 'Error' : 'Error');
     } finally {
@@ -172,7 +227,7 @@ export function OnboardingFlow({ email, onComplete }: Props) {
     setLoading(true);
     try {
       await putBio(bio.trim());
-      setStep(5);
+      setStep(7);
     } catch (e) {
       setErr(e instanceof RegistrationApiError ? e.envelope.error?.message ?? 'Error' : 'Error');
     } finally {
@@ -235,79 +290,88 @@ export function OnboardingFlow({ email, onComplete }: Props) {
 
       {step === 1 ? (
         <>
-          <Text style={styles.label}>Birth place (search)</Text>
-          <TextInput
-            style={styles.input}
-            value={placeQuery}
-            onChangeText={setPlaceQuery}
-            placeholder="e.g. Paris"
-            placeholderTextColor={colors.textMuted}
-            accessibilityLabel="Place search"
-          />
-          <Pressable style={styles.secondary} onPress={loadPlaces} accessibilityRole="button">
-            <Text style={styles.secondaryText}>Search places</Text>
+          <Text style={styles.body}>Indique ton sexe et ce qui t'attire.</Text>
+          <Text style={styles.label}>Je suis</Text>
+          <View style={styles.pills}>
+            {([['MALE', 'Homme'], ['FEMALE', 'Femme']] as const).map(([val, label]) => (
+              <Pressable
+                key={val}
+                style={[styles.pill, gender === val && styles.pillOn]}
+                onPress={() => setGender(val)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: gender === val }}
+                accessibilityLabel={label}
+              >
+                <Text style={[styles.pillText, gender === val && styles.pillTextOn]}>{label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={styles.label}>Attiré(e) par</Text>
+          <View style={styles.pills}>
+            {([['MEN', 'Les hommes'], ['WOMEN', 'Les femmes'], ['ALL', 'Les deux']] as const).map(([val, label]) => (
+              <Pressable
+                key={val}
+                style={[styles.pill, attraction === val && styles.pillOn]}
+                onPress={() => setAttraction(val)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: attraction === val }}
+                accessibilityLabel={label}
+              >
+                <Text style={[styles.pillText, attraction === val && styles.pillTextOn]}>{label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Pressable
+            style={({ pressed }) => [styles.btn, pressed && styles.pressed, loading && styles.dis]}
+            onPress={nextFromIdentity}
+            disabled={loading}
+            accessibilityRole="button"
+          >
+            {loading ? <ActivityIndicator color={colors.textPrimary} /> : <Text style={styles.btnText}>Continuer</Text>}
           </Pressable>
-          {placeHits.map((p) => (
-            <Pressable
-              key={p.label}
-              style={styles.hit}
-              onPress={() => {
-                setBirthPlace(p.label);
-                setBirthTz(p.timezone);
-              }}
-              accessibilityRole="button"
-            >
-              <Text style={styles.hitText}>{p.label}</Text>
-            </Pressable>
-          ))}
-          <Text style={styles.label}>Or type place label</Text>
+        </>
+      ) : null}
+
+      {step === 2 ? (
+        <>
+          <Text style={styles.body}>Comment tu t'appelles ?</Text>
+          <Text style={styles.label}>Prénom</Text>
           <TextInput
             style={styles.input}
-            value={birthPlace}
-            onChangeText={setBirthPlace}
-            placeholder="City, country"
+            value={firstName}
+            onChangeText={setFirstName}
+            placeholder="Ton prénom"
             placeholderTextColor={colors.textMuted}
-            accessibilityLabel="Birth place"
-          />
-          <Text style={styles.label}>Timezone (IANA)</Text>
-          <TextInput
-            style={styles.input}
-            value={birthTz}
-            onChangeText={setBirthTz}
-            placeholder="Europe/Paris"
-            placeholderTextColor={colors.textMuted}
-            accessibilityLabel="Birth timezone"
+            autoCapitalize="words"
+            autoCorrect={false}
+            accessibilityLabel="First name"
           />
           <Pressable
-            style={styles.row}
-            onPress={() => setBirthUnknown((v) => !v)}
-            accessibilityRole="checkbox"
-            accessibilityState={{ checked: birthUnknown }}
+            style={({ pressed }) => [styles.btn, pressed && styles.pressed, loading && styles.dis]}
+            onPress={nextFromName}
+            disabled={loading}
+            accessibilityRole="button"
           >
-            <Text style={styles.body}>Birth time unknown</Text>
+            {loading ? <ActivityIndicator color={colors.textPrimary} /> : <Text style={styles.btnText}>Continuer</Text>}
           </Pressable>
-          {!birthUnknown ? (
-            <TextInput
-              style={styles.input}
-              value={birthTime}
-              onChangeText={setBirthTime}
-              placeholder="HH:mm (24h)"
-              placeholderTextColor={colors.textMuted}
-              accessibilityLabel="Birth time"
-            />
-          ) : null}
+        </>
+      ) : null}
+
+      {step === 3 ? (
+        <>
+          <BirthForm values={birth} onChange={setBirth} error={birthErr} />
           <Pressable
             style={({ pressed }) => [styles.btn, pressed && styles.pressed, loading && styles.dis]}
             onPress={nextFromBirth}
             disabled={loading}
             accessibilityRole="button"
           >
-            {loading ? <ActivityIndicator color={colors.textPrimary} /> : <Text style={styles.btnText}>Continue</Text>}
+            {loading ? <ActivityIndicator color={colors.textPrimary} /> : <Text style={styles.btnText}>Continuer</Text>}
           </Pressable>
         </>
       ) : null}
 
-      {step === 2 ? (
+      {step === 4 ? (
         <>
           <Pressable style={styles.secondary} onPress={useDeviceLocation} accessibilityRole="button">
             <Text style={styles.secondaryText}>Use device location</Text>
@@ -335,7 +399,7 @@ export function OnboardingFlow({ email, onComplete }: Props) {
         </>
       ) : null}
 
-      {step === 3 ? (
+      {step === 5 ? (
         <>
           <Text style={styles.body}>Choose up to two dynamics (min 1).</Text>
           <View style={styles.pills}>
@@ -366,7 +430,7 @@ export function OnboardingFlow({ email, onComplete }: Props) {
         </>
       ) : null}
 
-      {step === 4 ? (
+      {step === 6 ? (
         <>
           <Text style={styles.label}>Short bio</Text>
           <TextInput
@@ -392,7 +456,7 @@ export function OnboardingFlow({ email, onComplete }: Props) {
         </>
       ) : null}
 
-      {step === 5 ? (
+      {step === 7 ? (
         <>
           <Text style={styles.body}>You are ready for the feed. Confirm to finish onboarding.</Text>
           <Pressable

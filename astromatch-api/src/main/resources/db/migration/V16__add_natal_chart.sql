@@ -1,0 +1,1 @@
+ALTER TABLE users ADD COLUMN natal_chart VARCHAR(1024) NULL;

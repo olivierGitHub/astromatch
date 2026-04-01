@@ -1,6 +1,7 @@
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, BackHandler, StyleSheet, View } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ForgotPasswordScreen } from './src/features/auth/ForgotPasswordScreen';
 import { HomeScreen } from './src/features/auth/HomeScreen';
@@ -59,6 +60,25 @@ export default function App() {
     return () => setSessionInvalidationHandler(null);
   }, []);
 
+  useEffect(() => {
+    const handler = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (route.screen === 'signIn') {
+        setRoute({ screen: 'register' });
+        return true;
+      }
+      if (route.screen === 'forgotPassword') {
+        setRoute({ screen: 'signIn', email: route.email });
+        return true;
+      }
+      if (route.screen === 'resetPassword') {
+        setRoute({ screen: 'forgotPassword', email: route.email });
+        return true;
+      }
+      return false;
+    });
+    return () => handler.remove();
+  }, [route]);
+
   if (route.screen === 'loading') {
     return (
       <View style={styles.loading}>
@@ -69,9 +89,12 @@ export default function App() {
   }
 
   return (
-    <>
+    <SafeAreaProvider>
       {route.screen === 'register' ? (
-        <RegisterScreen onRegistered={(email) => setRoute({ screen: 'signIn', email })} />
+        <RegisterScreen
+          onRegistered={(email) => setRoute({ screen: 'signIn', email })}
+          onSignIn={() => setRoute({ screen: 'signIn' })}
+        />
       ) : null}
       {route.screen === 'signIn' ? (
         <SignInScreen
@@ -107,7 +130,7 @@ export default function App() {
         <HomeScreen email={route.email} onSignOut={() => setRoute({ screen: 'register' })} />
       ) : null}
       <StatusBar style="light" />
-    </>
+    </SafeAreaProvider>
   );
 }
 

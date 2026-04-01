@@ -24,9 +24,10 @@ function mapValidationFieldToKey(field: string): 'email' | 'password' | 'birthDa
 
 type Props = {
   onRegistered: (email: string) => void;
+  onSignIn: () => void;
 };
 
-export function RegisterScreen({ onRegistered }: Props) {
+export function RegisterScreen({ onRegistered, onSignIn }: Props) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [birthDate, setBirthDate] = useState('1990-01-15');
@@ -146,6 +147,15 @@ export function RegisterScreen({ onRegistered }: Props) {
           <Text style={styles.buttonText}>Create account</Text>
         )}
       </Pressable>
+
+      <Pressable
+        style={({ pressed }) => [styles.signInLink, pressed && styles.signInLinkPressed]}
+        onPress={onSignIn}
+        accessibilityRole="button"
+        accessibilityLabel="Sign in to existing account"
+      >
+        <Text style={styles.signInLinkText}>Already have an account? <Text style={styles.signInLinkBold}>Sign in</Text></Text>
+      </Pressable>
     </View>
   );
 }
@@ -212,6 +222,22 @@ const styles = StyleSheet.create({
   buttonText: {
     color: colors.textPrimary,
     fontSize: typography.bodyL.fontSize,
+    fontWeight: '600',
+  },
+  signInLink: {
+    marginTop: spacing.scale[3],
+    alignItems: 'center',
+    paddingVertical: spacing.scale[2],
+  },
+  signInLinkPressed: {
+    opacity: 0.7,
+  },
+  signInLinkText: {
+    color: colors.textMuted,
+    fontSize: typography.bodyM.fontSize,
+  },
+  signInLinkBold: {
+    color: colors.secondary,
     fontWeight: '600',
   },
 });

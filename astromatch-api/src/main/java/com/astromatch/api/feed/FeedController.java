@@ -5,6 +5,7 @@ import java.util.UUID;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
@@ -20,6 +21,24 @@ public class FeedController {
 
 	public FeedController(FeedService feedService) {
 		this.feedService = feedService;
+	}
+
+	@GetMapping("/api/v1/feed/likes")
+	public ResponseEntity<ApiEnvelope<java.util.List<FeedDtos.PendingLikeDto>>> pendingLikes(
+			@AuthenticationPrincipal UUID userId) {
+		return ResponseEntity.ok(ApiEnvelope.success(feedService.getPendingLikes(userId)));
+	}
+
+	@GetMapping("/api/v1/feed/me")
+	public ResponseEntity<ApiEnvelope<FeedDtos.FeedCandidateCard>> myPreview(@AuthenticationPrincipal UUID userId) {
+		return ResponseEntity.ok(ApiEnvelope.success(feedService.buildPreviewCard(userId)));
+	}
+
+	@GetMapping("/api/v1/feed/profiles/{targetId}")
+	public ResponseEntity<ApiEnvelope<FeedDtos.FeedCandidateCard>> profile(
+			@AuthenticationPrincipal UUID userId,
+			@PathVariable UUID targetId) {
+		return ResponseEntity.ok(ApiEnvelope.success(feedService.buildProfileCard(userId, targetId)));
 	}
 
 	@GetMapping("/api/v1/feed/candidates")

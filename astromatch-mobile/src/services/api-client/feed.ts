@@ -8,6 +8,12 @@ export type FeedPhotoRef = {
   contentType: string;
 };
 
+export type NatalPlanet = {
+  planet: string;
+  symbol: string;
+  sign: string;
+};
+
 export type FeedCandidateCard = {
   userId: string;
   cosmicContext: string;
@@ -16,6 +22,10 @@ export type FeedCandidateCard = {
   localityLine: string;
   bioPreview: string;
   photos: FeedPhotoRef[];
+  redFlags: string[];
+  firstName: string;
+  age: number;
+  natalChart: NatalPlanet[];
 };
 
 export type SwipeAction = 'PASS' | 'LIKE' | 'SUPER_LIKE';
@@ -25,6 +35,10 @@ export type MismatchFocus = 'DYNAMIC' | 'PROFILE' | 'UNSPECIFIED';
 export type MatchCreated = {
   matchId: string;
   otherUserId: string;
+  myFirstPhotoId: string | null;
+  otherFirstPhotoId: string | null;
+  mySunSign: string | null;
+  otherSunSign: string | null;
 };
 
 export type SwipeResult = {
@@ -65,6 +79,45 @@ async function parseErr(res: Response): Promise<RegistrationApiError> {
       error: { code: 'ERROR', message: text, traceId: '' },
     });
   }
+}
+
+export type PendingLike = {
+  userId: string;
+  firstName: string | null;
+  firstPhotoId: string | null;
+};
+
+export async function fetchPendingLikes(): Promise<PendingLike[]> {
+  const res = await authenticatedFetch('/api/v1/feed/likes', {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  });
+  const text = await res.text();
+  if (!res.ok) throw await parseErr(res);
+  const j = JSON.parse(text) as { data: PendingLike[] };
+  return j.data ?? [];
+}
+
+export async function fetchFeedProfile(userId: string): Promise<FeedCandidateCard> {
+  const res = await authenticatedFetch(`/api/v1/feed/profiles/${userId}`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  });
+  const text = await res.text();
+  if (!res.ok) throw await parseErr(res);
+  const j = JSON.parse(text) as { data: FeedCandidateCard };
+  return j.data;
+}
+
+export async function fetchMyPreviewCard(): Promise<FeedCandidateCard> {
+  const res = await authenticatedFetch('/api/v1/feed/me', {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  });
+  const text = await res.text();
+  if (!res.ok) throw await parseErr(res);
+  const j = JSON.parse(text) as { data: FeedCandidateCard };
+  return j.data;
 }
 
 export async function fetchFeedQuota(): Promise<FeedQuota> {

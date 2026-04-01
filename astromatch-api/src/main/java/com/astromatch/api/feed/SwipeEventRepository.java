@@ -13,5 +13,7 @@ public interface SwipeEventRepository extends JpaRepository<SwipeEvent, UUID> {
 	boolean existsByViewerIdAndTargetUserIdAndActionIn(UUID viewerId, UUID targetUserId,
 			Collection<SwipeAction> actions);
 
+	java.util.List<SwipeEvent> findByTargetUserIdAndActionIn(UUID targetUserId, Collection<SwipeAction> actions);
+
 	long countByViewerIdAndActionAndCreatedAtGreaterThanEqual(UUID viewerId, SwipeAction action, Instant createdAt);
 }

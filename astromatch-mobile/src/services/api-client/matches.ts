@@ -1,10 +1,19 @@
+import { apiUrl } from './api-base';
 import { authenticatedFetch } from './authenticated-fetch';
 import { RegistrationApiError } from './types';
+
+export function matchProfilePhotoUrl(otherUserId: string, photoId: string): string {
+  return apiUrl(`/api/v1/matches/profiles/${otherUserId}/photos/${photoId}`);
+}
 
 export type MatchSummary = {
   matchId: string;
   otherUserId: string;
   otherEmail: string;
+  firstName: string;
+  firstPhotoId: string | null;
+  lastMessageBody: string | null;
+  lastMessageSenderId: string | null;
 };
 
 export type ChatMessage = {

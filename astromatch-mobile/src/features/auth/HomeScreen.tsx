@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, BackHandler, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 
 import { BillingSheet } from '../billing/BillingSheet';
 import { FeedScreen } from '../feed/FeedScreen';
 import { HelpScreen } from '../help/HelpScreen';
 import { MatchesScreen } from '../matches/MatchesScreen';
 import { ChatThreadScreen } from '../matches/ChatThreadScreen';
+import { ProfileScreen } from '../profile/ProfileScreen';
 import { clearSession } from '../../services/auth/session';
 import { fetchMe } from '../../services/api-client/me';
 import { logoutRemote } from '../../services/api-client/logout';
@@ -18,7 +21,13 @@ type Props = {
   onSignOut: () => void;
 };
 
-type HomePanel = 'discover' | 'matches' | 'account';
+type HomePanel = 'discover' | 'matches' | 'profile';
+
+const NAV_ITEMS: { panel: HomePanel; label: string; icon: string; iconActive: string }[] = [
+  { panel: 'discover', label: 'Discover', icon: 'compass-outline', iconActive: 'compass' },
+  { panel: 'matches',  label: 'Matches',  icon: 'heart-outline',   iconActive: 'heart' },
+  { panel: 'profile',  label: 'Profil',   icon: 'person-outline',  iconActive: 'person' },
+];
 
 export function HomeScreen({ email, onSignOut }: Props) {
   const [loading, setLoading] = useState(false);
@@ -26,6 +35,7 @@ export function HomeScreen({ email, onSignOut }: Props) {
   const [panel, setPanel] = useState<HomePanel>('discover');
   const [chatThread, setChatThread] = useState<{ matchId: string; otherUserId: string } | null>(null);
   const [accountSub, setAccountSub] = useState<'main' | 'help'>('main');
+  const [profileTab, setProfileTab] = useState<'edit' | 'account'>('edit');
   const [billingOpen, setBillingOpen] = useState(false);
   const [billingRefresh, setBillingRefresh] = useState(0);
 
@@ -49,10 +59,33 @@ export function HomeScreen({ email, onSignOut }: Props) {
   }, []);
 
   useEffect(() => {
-    if (panel !== 'account') {
+    if (panel !== 'profile') {
       setAccountSub('main');
     }
   }, [panel]);
+
+  useEffect(() => {
+    const handler = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (chatThread) {
+        setChatThread(null);
+        return true;
+      }
+      if (accountSub === 'help') {
+        setAccountSub('main');
+        return true;
+      }
+      if (profileTab === 'account') {
+        setProfileTab('edit');
+        return true;
+      }
+      if (panel !== 'discover') {
+        setPanel('discover');
+        return true;
+      }
+      return false;
+    });
+    return () => handler.remove();
+  }, [chatThread, accountSub, profileTab, panel]);
 
   const signOut = async () => {
     setLoading(true);
@@ -93,18 +126,18 @@ export function HomeScreen({ email, onSignOut }: Props) {
 
   if (chatThread) {
     return (
-      <View style={styles.container}>
+      <SafeAreaView style={styles.container}>
         <ChatThreadScreen
           matchId={chatThread.matchId}
           otherUserId={chatThread.otherUserId}
           onBack={() => setChatThread(null)}
         />
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       <BillingSheet
         visible={billingOpen}
         onClose={() => setBillingOpen(false)}
@@ -113,26 +146,6 @@ export function HomeScreen({ email, onSignOut }: Props) {
           setBillingOpen(false);
         }}
       />
-      <View style={styles.tabRow}>
-        {(['discover', 'matches', 'account'] as const).map((p) => (
-          <Pressable
-            key={p}
-            onPress={() => setPanel(p)}
-            style={({ pressed }) => [
-              styles.tab,
-              panel === p && styles.tabActive,
-              pressed && styles.tabPressed,
-            ]}
-            accessibilityRole="button"
-            accessibilityState={{ selected: panel === p }}
-            accessibilityLabel={p === 'discover' ? 'Discover' : p === 'matches' ? 'Matches' : 'Account'}
-          >
-            <Text style={[styles.tabText, panel === p && styles.tabTextActive]}>
-              {p === 'discover' ? 'Discover' : p === 'matches' ? 'Matches' : 'Account'}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
 
       <View style={styles.body}>
         {panel === 'discover' ? (
@@ -151,57 +164,83 @@ export function HomeScreen({ email, onSignOut }: Props) {
             }}
           />
         ) : null}
-        {panel === 'account' ? (
+        {panel === 'profile' ? (
           accountSub === 'help' ? (
             <HelpScreen onBack={() => setAccountSub('main')} />
           ) : (
-            <View style={styles.accountPanel}>
-              <Text style={styles.bodyText}>
-                Logged in as <Text style={styles.email}>{verifiedEmail ?? email}</Text>
-                {verifiedEmail ? <Text style={styles.subtle}> (verified)</Text> : null}
-              </Text>
-              <Pressable
-                style={({ pressed }) => [styles.shopLink, pressed && styles.buttonPressed]}
-                onPress={() => setAccountSub('help')}
-                accessibilityRole="button"
-                accessibilityLabel="Help and support"
-              >
-                <Text style={styles.shopLinkText}>Help & support</Text>
-              </Pressable>
-              <Pressable
-                style={({ pressed }) => [styles.button, pressed && styles.buttonPressed, loading && styles.buttonDisabled]}
-                onPress={signOut}
-                disabled={loading}
-                accessibilityRole="button"
-              >
-                {loading ? (
-                  <ActivityIndicator color={colors.textPrimary} />
-                ) : (
-                  <Text style={styles.buttonText}>Sign out</Text>
-                )}
-              </Pressable>
-              <Pressable
-                style={({ pressed }) => [styles.danger, pressed && styles.buttonPressed, loading && styles.buttonDisabled]}
-                onPress={deleteAccount}
-                disabled={loading}
-                accessibilityRole="button"
-                accessibilityLabel="Delete account permanently"
-              >
-                <Text style={styles.dangerText}>Delete account</Text>
-              </Pressable>
-              <Pressable
-                style={({ pressed }) => [styles.shopLink, pressed && styles.buttonPressed]}
-                onPress={() => setBillingOpen(true)}
-                accessibilityRole="button"
-                accessibilityLabel="Purchases and subscriptions"
-              >
-                <Text style={styles.shopLinkText}>Purchases & limits</Text>
-              </Pressable>
-            </View>
+            <ProfileScreen
+              tab={profileTab}
+              onTabChange={setProfileTab}
+              accountContent={
+                <ScrollView style={styles.accountPanel} contentContainerStyle={{ gap: spacing.scale[2], paddingBottom: spacing.scale[4] }}>
+                  <Text style={styles.bodyText}>
+                    Connecté en tant que <Text style={styles.emailText}>{verifiedEmail ?? email}</Text>
+                    {verifiedEmail ? <Text style={styles.subtle}> (vérifié)</Text> : null}
+                  </Text>
+                  <Pressable
+                    style={({ pressed }) => [styles.shopLink, pressed && styles.buttonPressed]}
+                    onPress={() => setAccountSub('help')}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.shopLinkText}>Aide & support</Text>
+                  </Pressable>
+                  <Pressable
+                    style={({ pressed }) => [styles.button, pressed && styles.buttonPressed, loading && styles.buttonDisabled]}
+                    onPress={signOut}
+                    disabled={loading}
+                    accessibilityRole="button"
+                  >
+                    {loading ? (
+                      <ActivityIndicator color={colors.textPrimary} />
+                    ) : (
+                      <Text style={styles.buttonText}>Se déconnecter</Text>
+                    )}
+                  </Pressable>
+                  <Pressable
+                    style={({ pressed }) => [styles.shopLink, pressed && styles.buttonPressed]}
+                    onPress={() => setBillingOpen(true)}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.shopLinkText}>Achats & limites</Text>
+                  </Pressable>
+                  <Pressable
+                    style={({ pressed }) => [styles.danger, pressed && styles.buttonPressed, loading && styles.buttonDisabled]}
+                    onPress={deleteAccount}
+                    disabled={loading}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.dangerText}>Supprimer le compte</Text>
+                  </Pressable>
+                </ScrollView>
+              }
+            />
           )
         ) : null}
       </View>
-    </View>
+
+      <View style={styles.navBar}>
+        {NAV_ITEMS.map(({ panel: p, label, icon, iconActive }) => {
+          const active = panel === p;
+          return (
+            <Pressable
+              key={p}
+              onPress={() => setPanel(p)}
+              style={({ pressed }) => [styles.navItem, pressed && styles.navItemPressed]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={label}
+            >
+              <Ionicons
+                name={(active ? iconActive : icon) as any}
+                size={26}
+                color={active ? colors.primary : colors.textMuted}
+              />
+              <Text style={[styles.navLabel, active && styles.navLabelActive]}>{label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </SafeAreaView>
   );
 }
 
@@ -209,43 +248,42 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
-    paddingHorizontal: spacing.scale[3],
-    paddingTop: spacing.scale[4],
-  },
-  tabRow: {
-    flexDirection: 'row',
-    gap: spacing.scale[2],
-    marginBottom: spacing.scale[2],
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: spacing.scale[2],
-    paddingHorizontal: spacing.scale[2],
-    borderRadius: radius.primary,
-    backgroundColor: colors.surface,
-    alignItems: 'center',
-  },
-  tabActive: {
-    backgroundColor: colors.secondary,
-  },
-  tabPressed: {
-    opacity: 0.88,
-  },
-  tabText: {
-    color: colors.textMuted,
-    fontWeight: '600',
-    fontSize: typography.bodyM.fontSize,
-  },
-  tabTextActive: {
-    color: colors.background,
+    paddingBottom: Platform.OS === 'android' ? 16 : 0,
   },
   body: {
     flex: 1,
   },
   accountPanel: {
     flex: 1,
+    paddingHorizontal: spacing.scale[3],
     paddingTop: spacing.scale[3],
     gap: spacing.scale[2],
+  },
+  navBar: {
+    flexDirection: 'row',
+    backgroundColor: colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: colors.textMuted + '22',
+    paddingTop: spacing.scale[2],
+    paddingBottom: spacing.scale[2],
+  },
+  navItem: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: spacing.scale[1],
+  },
+  navItemPressed: {
+    opacity: 0.7,
+  },
+  navLabel: {
+    fontSize: typography.caption.fontSize,
+    color: colors.textMuted,
+    fontWeight: '500',
+  },
+  navLabelActive: {
+    color: colors.primary,
+    fontWeight: '700',
   },
   bodyText: {
     color: colors.textMuted,
@@ -253,7 +291,7 @@ const styles = StyleSheet.create({
     lineHeight: typography.bodyL.lineHeight,
     marginBottom: spacing.scale[4],
   },
-  email: {
+  emailText: {
     color: colors.secondary,
     fontWeight: '600',
   },

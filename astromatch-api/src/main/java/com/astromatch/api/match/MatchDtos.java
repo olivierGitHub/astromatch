@@ -8,10 +8,14 @@ public final class MatchDtos {
 	private MatchDtos() {
 	}
 
-	public record MatchCreatedDto(String matchId, String otherUserId) {
+	public record MatchCreatedDto(String matchId, String otherUserId,
+			String myFirstPhotoId, String otherFirstPhotoId,
+			String mySunSign, String otherSunSign) {
 	}
 
-	public record MatchSummaryDto(String matchId, String otherUserId, String otherEmail) {
+	public record MatchSummaryDto(String matchId, String otherUserId, String otherEmail,
+			String firstName, String firstPhotoId,
+			String lastMessageBody, String lastMessageSenderId) {
 	}
 
 	public record MessageDto(String id, String senderId, String body, String createdAt) {

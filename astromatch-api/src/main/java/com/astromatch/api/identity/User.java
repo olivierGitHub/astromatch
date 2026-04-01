@@ -88,8 +88,25 @@ public class User {
 	private String locationPassLabel;
 
 	@Enumerated(EnumType.STRING)
+	@Column(name = "gender", length = 16)
+	private Gender gender;
+
+	@Enumerated(EnumType.STRING)
+	@Column(name = "attraction", length = 16)
+	private Attraction attraction;
+
+	@Enumerated(EnumType.STRING)
 	@Column(name = "account_status", nullable = false, length = 32)
 	private AccountStatus accountStatus = AccountStatus.ACTIVE;
+
+	@Column(name = "red_flags", length = 512)
+	private String redFlags;
+
+	@Column(name = "first_name", length = 128)
+	private String firstName;
+
+	@Column(name = "natal_chart", length = 1024)
+	private String natalChart;
 
 	public UUID getId() {
 		return id;
@@ -267,12 +284,52 @@ public class User {
 		this.locationPassLabel = locationPassLabel;
 	}
 
+	public Gender getGender() {
+		return gender;
+	}
+
+	public void setGender(Gender gender) {
+		this.gender = gender;
+	}
+
+	public Attraction getAttraction() {
+		return attraction;
+	}
+
+	public void setAttraction(Attraction attraction) {
+		this.attraction = attraction;
+	}
+
 	public AccountStatus getAccountStatus() {
 		return accountStatus;
 	}
 
 	public void setAccountStatus(AccountStatus accountStatus) {
 		this.accountStatus = accountStatus;
+	}
+
+	public String getRedFlags() {
+		return redFlags;
+	}
+
+	public void setRedFlags(String redFlags) {
+		this.redFlags = redFlags;
+	}
+
+	public String getFirstName() {
+		return firstName;
+	}
+
+	public void setFirstName(String firstName) {
+		this.firstName = firstName;
+	}
+
+	public String getNatalChart() {
+		return natalChart;
+	}
+
+	public void setNatalChart(String natalChart) {
+		this.natalChart = natalChart;
 	}
 
 	@PrePersist

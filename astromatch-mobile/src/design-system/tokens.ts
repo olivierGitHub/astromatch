@@ -7,10 +7,10 @@ export const colors = {
   primary: '#6C5CE7',
   secondary: '#14B8A6',
   accent: '#F59E0B',
-  background: '#0F1020',
-  surface: '#17192E',
-  textPrimary: '#F8FAFC',
-  textMuted: '#AAB1C5',
+  background: '#D2D7F0',
+  surface: '#DDE1F4',
+  textPrimary: '#0F1020',
+  textMuted: '#4A5070',
 } as const;
 
 /** Base unit 8px; scale from UX spec */
