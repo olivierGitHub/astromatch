@@ -12,7 +12,9 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import com.astromatch.api.common.api.ApiEnvelope;
 import com.astromatch.api.profile.ProfileService;
@@ -60,5 +62,28 @@ public class MatchController {
 	public ResponseEntity<ApiEnvelope<MatchDtos.MessageDto>> send(@AuthenticationPrincipal UUID userId,
 			@PathVariable UUID matchId, @Valid @RequestBody MatchDtos.SendMessageBody body) {
 		return ResponseEntity.ok(ApiEnvelope.success(matchMessagingService.sendMessage(userId, matchId, body.body())));
+	}
+
+	@PostMapping(value = "/{matchId}/messages/audio", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+	public ResponseEntity<ApiEnvelope<MatchDtos.MessageDto>> sendAudio(@AuthenticationPrincipal UUID userId,
+			@PathVariable UUID matchId, @RequestParam("file") MultipartFile file,
+			@RequestParam(value = "durationMs", required = false) Integer durationMs) {
+		return ResponseEntity
+				.ok(ApiEnvelope.success(matchMessagingService.sendVoiceMessage(userId, matchId, file, durationMs)));
+	}
+
+	@GetMapping("/{matchId}/messages/{messageId}/audio")
+	public ResponseEntity<byte[]> voiceAudio(@AuthenticationPrincipal UUID userId, @PathVariable UUID matchId,
+			@PathVariable UUID messageId) throws Exception {
+		byte[] bytes = matchMessagingService.readVoiceAttachment(userId, matchId, messageId);
+		String ct = matchMessagingService.getVoiceContentType(userId, matchId, messageId);
+		MediaType mt;
+		try {
+			mt = MediaType.parseMediaType(ct);
+		}
+		catch (Exception e) {
+			mt = MediaType.APPLICATION_OCTET_STREAM;
+		}
+		return ResponseEntity.ok().header(HttpHeaders.CONTENT_TYPE, mt.toString()).body(bytes);
 	}
 }

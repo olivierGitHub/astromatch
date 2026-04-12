@@ -6,6 +6,10 @@ export function matchProfilePhotoUrl(otherUserId: string, photoId: string): stri
   return apiUrl(`/api/v1/matches/profiles/${otherUserId}/photos/${photoId}`);
 }
 
+export function matchMessageAudioUrl(matchId: string, messageId: string): string {
+  return apiUrl(`/api/v1/matches/${matchId}/messages/${messageId}/audio`);
+}
+
 export type MatchSummary = {
   matchId: string;
   otherUserId: string;
@@ -16,12 +20,30 @@ export type MatchSummary = {
   lastMessageSenderId: string | null;
 };
 
+export type ChatMessageKind = 'TEXT' | 'AUDIO';
+
 export type ChatMessage = {
   id: string;
   senderId: string;
   body: string;
   createdAt: string;
+  kind: ChatMessageKind;
+  audioDurationMs: number | null;
 };
+
+function parseChatMessage(row: unknown): ChatMessage {
+  const o = row as Record<string, unknown>;
+  const kind: ChatMessageKind = o.kind === 'AUDIO' ? 'AUDIO' : 'TEXT';
+  const dur = o.audioDurationMs;
+  return {
+    id: String(o.id),
+    senderId: String(o.senderId),
+    body: typeof o.body === 'string' ? o.body : '',
+    createdAt: String(o.createdAt),
+    kind,
+    audioDurationMs: dur == null || dur === '' ? null : Number(dur),
+  };
+}
 
 async function parseErr(res: Response): Promise<RegistrationApiError> {
   const text = await res.text();
@@ -60,8 +82,8 @@ export async function fetchMessages(matchId: string): Promise<ChatMessage[]> {
   });
   const text = await res.text();
   if (!res.ok) throw await parseErr(res);
-  const j = JSON.parse(text) as { data: ChatMessage[] };
-  return j.data ?? [];
+  const j = JSON.parse(text) as { data: unknown[] };
+  return (j.data ?? []).map(parseChatMessage);
 }
 
 export async function sendMessage(matchId: string, body: string): Promise<ChatMessage> {
@@ -72,6 +94,26 @@ export async function sendMessage(matchId: string, body: string): Promise<ChatMe
   });
   const text = await res.text();
   if (!res.ok) throw await parseErr(res);
-  const j = JSON.parse(text) as { data: ChatMessage };
-  return j.data;
+  const j = JSON.parse(text) as { data: unknown };
+  return parseChatMessage(j.data);
+}
+
+export type VoiceUploadFile = { uri: string; name: string; type: string };
+
+export async function sendVoiceMessage(
+  matchId: string,
+  file: VoiceUploadFile,
+  durationMs: number,
+): Promise<ChatMessage> {
+  const formData = new FormData();
+  formData.append('file', file as unknown as Blob);
+  formData.append('durationMs', String(Math.max(0, Math.round(durationMs))));
+  const res = await authenticatedFetch(`/api/v1/matches/${matchId}/messages/audio`, {
+    method: 'POST',
+    body: formData,
+  });
+  const text = await res.text();
+  if (!res.ok) throw await parseErr(res);
+  const j = JSON.parse(text) as { data: unknown };
+  return parseChatMessage(j.data);
 }

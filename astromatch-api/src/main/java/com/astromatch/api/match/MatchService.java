@@ -1,6 +1,8 @@
 package com.astromatch.api.match;
 
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
@@ -80,7 +82,9 @@ public class MatchService {
 	@Transactional(readOnly = true)
 	public List<MatchDtos.MatchSummaryDto> listMatches(UUID userId) {
 		List<Match> rows = matchRepository.findAllForUser(userId);
-		List<MatchDtos.MatchSummaryDto> out = new ArrayList<>();
+		record MatchSummarySort(MatchDtos.MatchSummaryDto dto, Instant sortAt) {
+		}
+		List<MatchSummarySort> bucket = new ArrayList<>();
 		for (Match m : rows) {
 			UUID other = m.getUserLow().equals(userId) ? m.getUserHigh() : m.getUserLow();
 			if (userBlockRepository.existsEitherDirection(userId, other)) {
@@ -92,11 +96,24 @@ public class MatchService {
 			List<ProfilePhoto> photos = profilePhotoRepository.findByUserIdOrderBySortOrderAsc(other);
 			String firstPhotoId = photos.isEmpty() ? null : photos.get(0).getId().toString();
 			MatchMessage last = matchMessageRepository.findFirstByMatchIdOrderByCreatedAtDesc(m.getId()).orElse(null);
-			String lastBody = last != null ? last.getBody() : null;
+			String lastBody = null;
+			if (last != null) {
+				if (last.getKind() == MessageKind.AUDIO) {
+					lastBody = "Message vocal";
+				}
+				else {
+					lastBody = last.getBody();
+				}
+			}
 			String lastSenderId = last != null ? last.getSenderId().toString() : null;
-			out.add(new MatchDtos.MatchSummaryDto(m.getId().toString(), other.toString(), email, firstName, firstPhotoId, lastBody, lastSenderId));
+			Instant sortAt = last != null ? last.getCreatedAt() : m.getCreatedAt();
+			bucket.add(new MatchSummarySort(
+					new MatchDtos.MatchSummaryDto(m.getId().toString(), other.toString(), email, firstName, firstPhotoId,
+							lastBody, lastSenderId),
+					sortAt));
 		}
-		return out;
+		bucket.sort(Comparator.comparing(MatchSummarySort::sortAt).reversed().thenComparing(s -> s.dto().matchId()));
+		return bucket.stream().map(MatchSummarySort::dto).toList();
 	}
 
 	private String sunSignSymbol(User user) {

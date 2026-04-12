@@ -18,7 +18,8 @@ public final class MatchDtos {
 			String lastMessageBody, String lastMessageSenderId) {
 	}
 
-	public record MessageDto(String id, String senderId, String body, String createdAt) {
+	public record MessageDto(String id, String senderId, String body, String createdAt, String kind,
+			Integer audioDurationMs) {
 	}
 
 	public record SendMessageBody(@NotBlank @Size(max = 4000) String body) {

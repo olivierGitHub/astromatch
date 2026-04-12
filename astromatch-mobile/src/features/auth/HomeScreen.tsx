@@ -126,7 +126,7 @@ export function HomeScreen({ email, onSignOut }: Props) {
 
   if (chatThread) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
         <ChatThreadScreen
           matchId={chatThread.matchId}
           otherUserId={chatThread.otherUserId}

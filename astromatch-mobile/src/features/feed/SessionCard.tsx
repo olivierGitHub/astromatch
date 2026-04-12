@@ -11,17 +11,20 @@ import { Image } from 'expo-image';
 
 import { colors, radius, spacing, typography } from '../../design-system';
 import { type FeedCandidateCard, type NatalPlanet, feedProfilePhotoUrl } from '../../services/api-client/feed';
+import { matchProfilePhotoUrl } from '../../services/api-client/matches';
 import { getAccessToken } from '../../services/auth/session';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 
 type Props = {
   card: FeedCandidateCard;
+  /** After you have swiped, feed photo URLs are blocked server-side; use match URLs for matched users. */
+  useMatchPhotoUrls?: boolean;
   onSafetyMenu?: () => void;
   onMismatch?: () => void;
 };
 
-export function SessionCard({ card, onSafetyMenu, onMismatch }: Props) {
+export function SessionCard({ card, useMatchPhotoUrls = false, onSafetyMenu, onMismatch }: Props) {
   const [token, setToken] = useState<string | null>(null);
 
   useEffect(() => {
@@ -42,13 +45,18 @@ export function SessionCard({ card, onSafetyMenu, onMismatch }: Props) {
     ? { Authorization: `Bearer ${token}`, 'ngrok-skip-browser-warning': 'true' }
     : undefined;
 
+  const photoUri = (photoId: string) =>
+    useMatchPhotoUrls
+      ? matchProfilePhotoUrl(card.userId, photoId)
+      : feedProfilePhotoUrl(card.userId, photoId);
+
   return (
     <ScrollView style={styles.card} showsVerticalScrollIndicator={false} bounces={false}>
       {/* Hero — première photo plein écran */}
       <View style={styles.hero}>
         {firstPhoto && headers ? (
           <Image
-            source={{ uri: feedProfilePhotoUrl(card.userId, firstPhoto.id), headers }}
+            source={{ uri: photoUri(firstPhoto.id), headers }}
             style={styles.heroImg}
             contentFit="cover"
             accessibilityLabel="Profile photo"
@@ -95,7 +103,7 @@ export function SessionCard({ card, onSafetyMenu, onMismatch }: Props) {
       {/* Photo 2 (beach) */}
       {extraPhotos[0] && headers ? (
         <Image
-          source={{ uri: feedProfilePhotoUrl(card.userId, extraPhotos[0].id), headers }}
+          source={{ uri: photoUri(extraPhotos[0].id), headers }}
           style={styles.extraPhoto}
           contentFit="cover"
           accessibilityLabel="Additional photo"
@@ -114,7 +122,7 @@ export function SessionCard({ card, onSafetyMenu, onMismatch }: Props) {
       {/* Photo 3 (monument) */}
       {extraPhotos[1] && headers ? (
         <Image
-          source={{ uri: feedProfilePhotoUrl(card.userId, extraPhotos[1].id), headers }}
+          source={{ uri: photoUri(extraPhotos[1].id), headers }}
           style={styles.extraPhoto}
           contentFit="cover"
           accessibilityLabel="Additional photo"
@@ -139,7 +147,7 @@ export function SessionCard({ card, onSafetyMenu, onMismatch }: Props) {
         headers ? (
           <Image
             key={p.id}
-            source={{ uri: feedProfilePhotoUrl(card.userId, p.id), headers }}
+            source={{ uri: photoUri(p.id), headers }}
             style={styles.extraPhoto}
             contentFit="cover"
             accessibilityLabel="Additional photo"
