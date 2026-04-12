@@ -41,6 +41,12 @@ public class MatchMessage {
 	@Column(name = "audio_duration_ms")
 	private Integer audioDurationMs;
 
+	@Column(name = "image_storage_filename", length = 512)
+	private String imageStorageFilename;
+
+	@Column(name = "image_content_type", length = 128)
+	private String imageContentType;
+
 	@Column(name = "created_at", nullable = false)
 	private Instant createdAt;
 
@@ -106,6 +112,22 @@ public class MatchMessage {
 
 	public void setAudioDurationMs(Integer audioDurationMs) {
 		this.audioDurationMs = audioDurationMs;
+	}
+
+	public String getImageStorageFilename() {
+		return imageStorageFilename;
+	}
+
+	public void setImageStorageFilename(String imageStorageFilename) {
+		this.imageStorageFilename = imageStorageFilename;
+	}
+
+	public String getImageContentType() {
+		return imageContentType;
+	}
+
+	public void setImageContentType(String imageContentType) {
+		this.imageContentType = imageContentType;
 	}
 
 	public Instant getCreatedAt() {

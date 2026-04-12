@@ -101,6 +101,9 @@ public class MatchService {
 				if (last.getKind() == MessageKind.AUDIO) {
 					lastBody = "Message vocal";
 				}
+				else if (last.getKind() == MessageKind.IMAGE) {
+					lastBody = "Photo";
+				}
 				else {
 					lastBody = last.getBody();
 				}

@@ -86,4 +86,25 @@ public class MatchController {
 		}
 		return ResponseEntity.ok().header(HttpHeaders.CONTENT_TYPE, mt.toString()).body(bytes);
 	}
+
+	@PostMapping(value = "/{matchId}/messages/image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+	public ResponseEntity<ApiEnvelope<MatchDtos.MessageDto>> sendImage(@AuthenticationPrincipal UUID userId,
+			@PathVariable UUID matchId, @RequestParam("file") MultipartFile file) {
+		return ResponseEntity.ok(ApiEnvelope.success(matchMessagingService.sendImageMessage(userId, matchId, file)));
+	}
+
+	@GetMapping("/{matchId}/messages/{messageId}/image")
+	public ResponseEntity<byte[]> messageImage(@AuthenticationPrincipal UUID userId, @PathVariable UUID matchId,
+			@PathVariable UUID messageId) throws Exception {
+		byte[] bytes = matchMessagingService.readImageAttachment(userId, matchId, messageId);
+		String ct = matchMessagingService.getImageContentType(userId, matchId, messageId);
+		MediaType mt;
+		try {
+			mt = MediaType.parseMediaType(ct);
+		}
+		catch (Exception e) {
+			mt = MediaType.APPLICATION_OCTET_STREAM;
+		}
+		return ResponseEntity.ok().header(HttpHeaders.CONTENT_TYPE, mt.toString()).body(bytes);
+	}
 }

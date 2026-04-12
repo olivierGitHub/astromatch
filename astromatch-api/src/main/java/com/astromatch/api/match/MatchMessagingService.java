@@ -131,6 +131,55 @@ public class MatchMessagingService {
 		return toDto(msg);
 	}
 
+	@Transactional
+	public MatchDtos.MessageDto sendImageMessage(UUID userId, UUID matchId, MultipartFile file) {
+		if (file == null || file.isEmpty()) {
+			throw new ProfileRequestException("Image file is required");
+		}
+		long maxBytes = uploadProperties.getMaxPhotoBytes();
+		if (file.getSize() > maxBytes) {
+			throw new ProfileRequestException("Image too large");
+		}
+		String rawCt = file.getContentType();
+		String ct = rawCt != null && !rawCt.isBlank() ? rawCt.trim() : "application/octet-stream";
+		if (!ct.toLowerCase().startsWith("image/")) {
+			throw new ProfileRequestException("Only image uploads are allowed");
+		}
+		Match m = matchService.requireParticipant(matchId, userId);
+		assertNotBlocked(userId, m);
+
+		UUID id = UUID.randomUUID();
+		String filename = "img-" + id + imageStorageSuffix(ct);
+		Path dir = Path.of(uploadProperties.getDir());
+		try {
+			Files.createDirectories(dir);
+			Path out = dir.resolve(filename);
+			try (InputStream in = file.getInputStream()) {
+				Files.copy(in, out, StandardCopyOption.REPLACE_EXISTING);
+			}
+		}
+		catch (IOException e) {
+			throw new ProfileRequestException("Could not store image");
+		}
+
+		MatchMessage msg = new MatchMessage();
+		msg.setId(id);
+		msg.setMatchId(matchId);
+		msg.setSenderId(userId);
+		msg.setKind(MessageKind.IMAGE);
+		msg.setBody("");
+		msg.setImageStorageFilename(filename);
+		msg.setImageContentType(ct);
+		msg.setCreatedAt(Instant.now());
+		matchMessageRepository.save(msg);
+
+		UUID recipient = m.getUserLow().equals(userId) ? m.getUserHigh() : m.getUserLow();
+		if (!recipient.equals(userId)) {
+			pushNotificationService.notifyNewMessage(matchId, recipient, userId, "Photo");
+		}
+		return toDto(msg);
+	}
+
 	@Transactional(readOnly = true)
 	public byte[] readVoiceAttachment(UUID userId, UUID matchId, UUID messageId) throws IOException {
 		Match m = matchService.requireParticipant(matchId, userId);
@@ -162,6 +211,37 @@ public class MatchMessagingService {
 		return ct != null && !ct.isBlank() ? ct : "application/octet-stream";
 	}
 
+	@Transactional(readOnly = true)
+	public byte[] readImageAttachment(UUID userId, UUID matchId, UUID messageId) throws IOException {
+		Match m = matchService.requireParticipant(matchId, userId);
+		assertNotBlocked(userId, m);
+		MatchMessage msg = matchMessageRepository.findById(messageId).orElseThrow(() -> new ProfileRequestException("Not found"));
+		if (!msg.getMatchId().equals(matchId) || msg.getKind() != MessageKind.IMAGE) {
+			throw new ProfileRequestException("Not found");
+		}
+		String fn = msg.getImageStorageFilename();
+		if (fn == null || fn.isBlank()) {
+			throw new ProfileRequestException("Not found");
+		}
+		Path path = Path.of(uploadProperties.getDir()).resolve(fn);
+		if (!Files.isRegularFile(path)) {
+			throw new ProfileRequestException("Not found");
+		}
+		return Files.readAllBytes(path);
+	}
+
+	@Transactional(readOnly = true)
+	public String getImageContentType(UUID userId, UUID matchId, UUID messageId) {
+		Match m = matchService.requireParticipant(matchId, userId);
+		assertNotBlocked(userId, m);
+		MatchMessage msg = matchMessageRepository.findById(messageId).orElseThrow(() -> new ProfileRequestException("Not found"));
+		if (!msg.getMatchId().equals(matchId) || msg.getKind() != MessageKind.IMAGE) {
+			throw new ProfileRequestException("Not found");
+		}
+		String ct = msg.getImageContentType();
+		return ct != null && !ct.isBlank() ? ct : "application/octet-stream";
+	}
+
 	private void assertNotBlocked(UUID userId, Match m) {
 		UUID other = m.getUserLow().equals(userId) ? m.getUserHigh() : m.getUserLow();
 		if (userBlockRepository.existsEitherDirection(userId, other)) {
@@ -181,6 +261,26 @@ public class MatchMessagingService {
 			return ".m4a";
 		}
 		return ".bin";
+	}
+
+	private static String imageStorageSuffix(String contentType) {
+		String c = contentType.toLowerCase();
+		if (c.contains("png")) {
+			return ".png";
+		}
+		if (c.contains("gif")) {
+			return ".gif";
+		}
+		if (c.contains("webp")) {
+			return ".webp";
+		}
+		if (c.contains("heic") || c.contains("heif")) {
+			return ".heic";
+		}
+		if (c.contains("jpeg") || c.contains("jpg")) {
+			return ".jpg";
+		}
+		return ".jpg";
 	}
 
 	private static MatchDtos.MessageDto toDto(MatchMessage m) {

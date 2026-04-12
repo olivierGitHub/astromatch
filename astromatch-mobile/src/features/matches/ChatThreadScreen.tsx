@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Audio, type AVPlaybackStatus } from 'expo-av';
+import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -24,7 +25,9 @@ import { colors, radius, spacing, typography } from '../../design-system';
 import {
   fetchMessages,
   matchMessageAudioUrl,
+  matchMessageImageUrl,
   matchProfilePhotoUrl,
+  sendImageMessage,
   sendMessage,
   sendVoiceMessage,
   type ChatMessage,
@@ -95,12 +98,14 @@ export function ChatThreadScreen({ matchId, otherUserId, onBack }: Props) {
   const [profileLoading, setProfileLoading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [voiceSending, setVoiceSending] = useState(false);
+  const [imageSending, setImageSending] = useState(false);
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
   const [voicePlayback, setVoicePlayback] = useState({ positionMs: 0, durationMs: 0 });
   /** Hauteur clavier (padding bas) — évite KeyboardAvoidingView + FlatList + SafeArea. */
   const [keyboardBottomInset, setKeyboardBottomInset] = useState(0);
   const recordingRef = useRef<Audio.Recording | null>(null);
   const playbackRef = useRef<Audio.Sound | null>(null);
+  const listRef = useRef<FlatList<ChatMessage>>(null);
   const keyboardRecalcTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -143,6 +148,18 @@ export function ChatThreadScreen({ matchId, otherUserId, onBack }: Props) {
   useEffect(() => {
     load();
   }, [load]);
+
+  /** À l’ouverture (ou changement de match), afficher le bas de fil = derniers messages. */
+  useEffect(() => {
+    if (loading) return;
+    const scrollEnd = () => listRef.current?.scrollToEnd({ animated: false });
+    const raf = requestAnimationFrame(scrollEnd);
+    const t = setTimeout(scrollEnd, 200);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(t);
+    };
+  }, [loading, matchId]);
 
   useEffect(() => {
     const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -301,7 +318,7 @@ export function ChatThreadScreen({ matchId, otherUserId, onBack }: Props) {
   };
 
   const startVoiceRecording = async () => {
-    if (sending || voiceSending || isRecording) return;
+    if (sending || voiceSending || imageSending || isRecording) return;
     try {
       const perm = await Audio.requestPermissionsAsync();
       if (!perm.granted) {
@@ -349,6 +366,7 @@ export function ChatThreadScreen({ matchId, otherUserId, onBack }: Props) {
         durationMs,
       );
       setItems((prev) => [...prev, msg]);
+      requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
     } catch (e) {
       setErr(
         e instanceof RegistrationApiError
@@ -361,11 +379,49 @@ export function ChatThreadScreen({ matchId, otherUserId, onBack }: Props) {
   };
 
   const onMicPress = () => {
-    if (voiceSending) return;
+    if (voiceSending || imageSending) return;
     if (isRecording) {
       void stopVoiceRecordingAndSend();
     } else {
       void startVoiceRecording();
+    }
+  };
+
+  const onPickImage = async () => {
+    if (sending || voiceSending || imageSending || isRecording) return;
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Photos', "L'accès à la galerie est nécessaire pour envoyer une image.");
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsMultipleSelection: false,
+        quality: 0.85,
+      });
+      if (result.canceled || !result.assets?.[0]) return;
+      const asset = result.assets[0];
+      const uri = asset.uri;
+      const name = asset.fileName ?? 'photo.jpg';
+      const mime = asset.mimeType ?? 'image/jpeg';
+      setImageSending(true);
+      setErr(null);
+      try {
+        const msg = await sendImageMessage(matchId, { uri, name, type: mime });
+        setItems((prev) => [...prev, msg]);
+        requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+      } catch (e) {
+        setErr(
+          e instanceof RegistrationApiError
+            ? e.envelope.error?.message ?? "Envoi de l'image impossible"
+            : "Envoi de l'image impossible",
+        );
+      } finally {
+        setImageSending(false);
+      }
+    } catch {
+      Alert.alert('Image', "Impossible d'ouvrir la galerie.");
     }
   };
 
@@ -454,6 +510,7 @@ export function ChatThreadScreen({ matchId, otherUserId, onBack }: Props) {
       const msg = await sendMessage(matchId, text);
       setDraft('');
       setItems((prev) => [...prev, msg]);
+      requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
     } catch (e) {
       setErr(
         e instanceof RegistrationApiError
@@ -535,9 +592,11 @@ export function ChatThreadScreen({ matchId, otherUserId, onBack }: Props) {
         ]}
       >
         <FlatList
+          ref={listRef}
           style={styles.listFlex}
           data={items}
           keyExtractor={(m) => m.id}
+          showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
           contentContainerStyle={styles.list}
@@ -623,6 +682,29 @@ export function ChatThreadScreen({ matchId, otherUserId, onBack }: Props) {
               </View>
             );
           }
+          if (item.kind === 'IMAGE') {
+            return (
+              <View style={[styles.bubbleWrap, mine ? styles.bubbleMine : styles.bubbleTheirs]}>
+                <View style={[styles.imageBubble, mine ? styles.bubbleBgMine : styles.bubbleBgTheirs]}>
+                  {headers ? (
+                    <Image
+                      source={{
+                        uri: matchMessageImageUrl(matchId, item.id),
+                        headers,
+                      }}
+                      style={styles.chatImage}
+                      contentFit="cover"
+                      accessibilityLabel="Image dans la conversation"
+                    />
+                  ) : (
+                    <View style={[styles.chatImage, styles.chatImagePlaceholder]}>
+                      <ActivityIndicator color={colors.secondary} />
+                    </View>
+                  )}
+                </View>
+              </View>
+            );
+          }
           return (
             <View style={[styles.bubbleWrap, mine ? styles.bubbleMine : styles.bubbleTheirs]}>
               <View style={[styles.bubble, mine ? styles.bubbleBgMine : styles.bubbleBgTheirs]}>
@@ -634,13 +716,30 @@ export function ChatThreadScreen({ matchId, otherUserId, onBack }: Props) {
         />
         <View style={styles.composer}>
         <Pressable
+          onPress={() => void onPickImage()}
+          disabled={sending || voiceSending || imageSending || isRecording}
+          style={({ pressed }) => [
+            styles.attachBtn,
+            pressed && styles.micBtnPressed,
+            (sending || voiceSending || imageSending || isRecording) && styles.sendDisabled,
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel="Envoyer une image depuis la galerie"
+        >
+          {imageSending ? (
+            <ActivityIndicator color={colors.textPrimary} />
+          ) : (
+            <Ionicons name="image-outline" size={24} color={colors.textPrimary} />
+          )}
+        </Pressable>
+        <Pressable
           onPress={onMicPress}
-          disabled={sending || voiceSending}
+          disabled={sending || voiceSending || imageSending}
           style={({ pressed }) => [
             styles.micBtn,
             isRecording && styles.micBtnRecording,
             pressed && styles.micBtnPressed,
-            (sending || voiceSending) && styles.sendDisabled,
+            (sending || voiceSending || imageSending) && styles.sendDisabled,
           ]}
           accessibilityRole="button"
           accessibilityLabel={isRecording ? 'Arrêter et envoyer le vocal' : 'Enregistrer un message vocal'}
@@ -664,7 +763,7 @@ export function ChatThreadScreen({ matchId, otherUserId, onBack }: Props) {
         <Pressable
           style={({ pressed }) => [styles.send, pressed && styles.sendPressed, sending && styles.sendDisabled]}
           onPress={onSend}
-          disabled={sending || isRecording}
+          disabled={sending || isRecording || imageSending}
           accessibilityRole="button"
           accessibilityLabel="Send message"
         >
@@ -859,6 +958,28 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     minWidth: 36,
     textAlign: 'right',
+  },
+  imageBubble: {
+    borderRadius: radius.primary,
+    overflow: 'hidden',
+    maxWidth: 280,
+  },
+  chatImage: {
+    width: 260,
+    height: 220,
+    backgroundColor: colors.surface,
+  },
+  chatImagePlaceholder: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  attachBtn: {
+    minHeight: 44,
+    minWidth: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: radius.primary,
   },
   micBtn: {
     minHeight: 44,

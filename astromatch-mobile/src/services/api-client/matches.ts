@@ -10,6 +10,10 @@ export function matchMessageAudioUrl(matchId: string, messageId: string): string
   return apiUrl(`/api/v1/matches/${matchId}/messages/${messageId}/audio`);
 }
 
+export function matchMessageImageUrl(matchId: string, messageId: string): string {
+  return apiUrl(`/api/v1/matches/${matchId}/messages/${messageId}/image`);
+}
+
 export type MatchSummary = {
   matchId: string;
   otherUserId: string;
@@ -20,7 +24,7 @@ export type MatchSummary = {
   lastMessageSenderId: string | null;
 };
 
-export type ChatMessageKind = 'TEXT' | 'AUDIO';
+export type ChatMessageKind = 'TEXT' | 'AUDIO' | 'IMAGE';
 
 export type ChatMessage = {
   id: string;
@@ -33,7 +37,9 @@ export type ChatMessage = {
 
 function parseChatMessage(row: unknown): ChatMessage {
   const o = row as Record<string, unknown>;
-  const kind: ChatMessageKind = o.kind === 'AUDIO' ? 'AUDIO' : 'TEXT';
+  const k = o.kind;
+  const kind: ChatMessageKind =
+    k === 'AUDIO' ? 'AUDIO' : k === 'IMAGE' ? 'IMAGE' : 'TEXT';
   const dur = o.audioDurationMs;
   return {
     id: String(o.id),
@@ -109,6 +115,19 @@ export async function sendVoiceMessage(
   formData.append('file', file as unknown as Blob);
   formData.append('durationMs', String(Math.max(0, Math.round(durationMs))));
   const res = await authenticatedFetch(`/api/v1/matches/${matchId}/messages/audio`, {
+    method: 'POST',
+    body: formData,
+  });
+  const text = await res.text();
+  if (!res.ok) throw await parseErr(res);
+  const j = JSON.parse(text) as { data: unknown };
+  return parseChatMessage(j.data);
+}
+
+export async function sendImageMessage(matchId: string, file: VoiceUploadFile): Promise<ChatMessage> {
+  const formData = new FormData();
+  formData.append('file', file as unknown as Blob);
+  const res = await authenticatedFetch(`/api/v1/matches/${matchId}/messages/image`, {
     method: 'POST',
     body: formData,
   });
